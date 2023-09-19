@@ -215,12 +215,9 @@ fn api_set(reader: &mut BufReader<&UnixStream>, d: &mut LockReadGuard<Device>) -
                     return 0; // Done
                 }
                 {
-                    let parsed_cmd: Vec<&str> = cmd.split('=').collect();
-                    if parsed_cmd.len() != 2 {
+                    let Some((key, val)) = cmd.split_once('=') else {
                         return EPROTO;
-                    }
-
-                    let (key, val) = (parsed_cmd[0], parsed_cmd[1]);
+                    };
 
                     match key {
                         "private_key" => match val.parse::<KeyBytes>() {
