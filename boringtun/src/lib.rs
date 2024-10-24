@@ -14,6 +14,7 @@ pub mod ffi;
 pub mod jni;
 pub mod noise;
 
+#[cfg(any(feature = "ffi-bindings", feature = "device"))]
 pub(crate) mod serialization;
 
 /// Re-export of the x25519 types
