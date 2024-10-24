@@ -480,6 +480,10 @@ impl Tunn {
         }
     }
 
+    pub(crate) fn has_current_session(&self) -> bool {
+        self.sessions[self.current % N_SESSIONS].is_some()
+    }
+
     /// Decrypts a data packet, and stores the decapsulated packet in dst.
     fn handle_data<'a>(
         &mut self,
@@ -691,6 +695,7 @@ mod tests {
 
     use super::*;
     use rand_core::{OsRng, RngCore};
+    use timers::REJECT_AFTER_TIME;
 
     fn create_two_tuns(now: Instant, keep_alive: Option<u16>) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
@@ -891,6 +896,25 @@ mod tests {
             TunnResult::Done
         ));
         update_timer_results_in_handshake(&mut my_tun, now);
+    }
+
+    #[test]
+    fn responder_does_not_initiate_handshake_after_session_is_expired() {
+        let mut now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now, Some(25));
+        let mut my_dst = [0u8; 1024];
+
+        now += REJECT_AFTER_TIME + Duration::from_secs(1);
+
+        assert!(matches!(
+            their_tun.update_timers_at(&mut [], now),
+            TunnResult::Done
+        ));
+        assert!(matches!(
+            my_tun.update_timers_at(&mut my_dst, now),
+            TunnResult::WriteToNetwork(_)
+        ));
     }
 
     #[test]
