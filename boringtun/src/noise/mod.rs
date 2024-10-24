@@ -692,7 +692,7 @@ mod tests {
     use super::*;
     use rand_core::{OsRng, RngCore};
 
-    fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
+    fn create_two_tuns(now: Instant, keep_alive: Option<u16>) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
         let my_idx = OsRng.next_u32();
@@ -705,7 +705,7 @@ mod tests {
             my_secret_key,
             their_public_key,
             None,
-            None,
+            keep_alive,
             my_idx,
             None,
             now,
@@ -715,7 +715,7 @@ mod tests {
             their_secret_key,
             my_public_key,
             None,
-            None,
+            keep_alive,
             their_idx,
             None,
             now,
@@ -771,8 +771,8 @@ mod tests {
         assert!(matches!(keepalive, TunnResult::Done));
     }
 
-    fn create_two_tuns_and_handshake(now: Instant) -> (Tunn, Tunn) {
-        let (mut my_tun, mut their_tun) = create_two_tuns(now);
+    fn create_two_tuns_and_handshake(now: Instant, keep_alive: Option<u16>) -> (Tunn, Tunn) {
+        let (mut my_tun, mut their_tun) = create_two_tuns(now, keep_alive);
         let init = create_handshake_init(&mut my_tun, now);
         let resp = create_handshake_response(&mut their_tun, &init, now);
         let keepalive = parse_handshake_resp(&mut my_tun, &resp, now);
@@ -807,14 +807,14 @@ mod tests {
     fn create_two_tunnels_linked_to_eachother() {
         let now = Instant::now();
 
-        let (_my_tun, _their_tun) = create_two_tuns(now);
+        let (_my_tun, _their_tun) = create_two_tuns(now, None);
     }
 
     #[test]
     fn handshake_init() {
         let now = Instant::now();
 
-        let (mut my_tun, _their_tun) = create_two_tuns(now);
+        let (mut my_tun, _their_tun) = create_two_tuns(now, None);
         let init = create_handshake_init(&mut my_tun, now);
         let packet = Tunn::parse_incoming_packet(&init).unwrap();
         assert!(matches!(packet, Packet::HandshakeInit(_)));
@@ -824,7 +824,7 @@ mod tests {
     fn handshake_init_and_response() {
         let now = Instant::now();
 
-        let (mut my_tun, mut their_tun) = create_two_tuns(now);
+        let (mut my_tun, mut their_tun) = create_two_tuns(now, None);
         let init = create_handshake_init(&mut my_tun, now);
         let resp = create_handshake_response(&mut their_tun, &init, now);
         let packet = Tunn::parse_incoming_packet(&resp).unwrap();
@@ -835,7 +835,7 @@ mod tests {
     fn full_handshake() {
         let now = Instant::now();
 
-        let (mut my_tun, mut their_tun) = create_two_tuns(now);
+        let (mut my_tun, mut their_tun) = create_two_tuns(now, None);
         let init = create_handshake_init(&mut my_tun, now);
         let resp = create_handshake_response(&mut their_tun, &init, now);
         let keepalive = parse_handshake_resp(&mut my_tun, &resp, now);
@@ -847,7 +847,7 @@ mod tests {
     fn full_handshake_plus_timers() {
         let now = Instant::now();
 
-        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now, None);
         // Time has not yet advanced so their is nothing to do
         assert!(matches!(
             my_tun.update_timers_at(&mut [], now),
@@ -863,7 +863,7 @@ mod tests {
     fn new_handshake_after_two_mins() {
         let mut now = Instant::now();
 
-        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now, None);
         let mut my_dst = [0u8; 1024];
 
         // Advance time 1 second and "send" 1 packet so that we send a handshake
@@ -897,7 +897,7 @@ mod tests {
     fn handshake_no_resp_rekey_timeout() {
         let mut now = Instant::now();
 
-        let (mut my_tun, _their_tun) = create_two_tuns(now);
+        let (mut my_tun, _their_tun) = create_two_tuns(now, None);
 
         let init = create_handshake_init(&mut my_tun, now);
         let packet = Tunn::parse_incoming_packet(&init).unwrap();
@@ -909,7 +909,7 @@ mod tests {
 
     #[test]
     fn one_ip_packet() {
-        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(Instant::now());
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(Instant::now(), None);
         let mut my_dst = [0u8; 1024];
         let mut their_dst = [0u8; 1024];
 
