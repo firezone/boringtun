@@ -677,9 +677,9 @@ dependencies = [
 
 [[package]]
 name = "mock_instant"
-version = "0.3.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c1a54de846c4006b88b1516731cc1f6026eb5dc4bcb186aa071ef66d40524ec"
+checksum = "15dce1a197fd6e12d773d7e4e7e1681fa5de6eb689ecaae824dc3cd1f643e7dc"
 
 [[package]]
 name = "nix"
