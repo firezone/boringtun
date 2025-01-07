@@ -238,7 +238,12 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: VecDeque::new(),
-            timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), now),
+            timers: Timers::new(
+                persistent_keepalive,
+                rate_limiter.is_none(),
+                index as u64,
+                now,
+            ),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new_at(
@@ -693,7 +698,8 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use rand_core::{OsRng, RngCore};
+    use rand::{rngs::OsRng, RngCore};
+    use timers::MAX_JITTER;
 
     fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
@@ -793,17 +799,23 @@ mod tests {
         packet
     }
 
-    fn update_timer_results_in_handshake(tun: &mut Tunn, now: Instant) {
-        let mut dst = vec![0u8; 2048];
-        let result = tun.update_timers_at(&mut dst, now);
-        assert!(matches!(result, TunnResult::WriteToNetwork(_)));
-        let packet_data = if let TunnResult::WriteToNetwork(data) = result {
-            data
-        } else {
-            unreachable!();
-        };
-        let packet = Tunn::parse_incoming_packet(packet_data).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
+    fn update_timer_results_in_handshake(tun: &mut Tunn, now: &mut Instant) {
+        for _ in 0..=MAX_JITTER.as_millis() {
+            *now += Duration::from_millis(1);
+
+            let mut dst = vec![0u8; 2048];
+            let TunnResult::WriteToNetwork(packet_data) = tun.update_timers_at(&mut dst, *now)
+            else {
+                continue;
+            };
+
+            let packet = Tunn::parse_incoming_packet(packet_data).unwrap();
+            assert!(matches!(packet, Packet::HandshakeInit(_)));
+
+            return;
+        }
+
+        panic!("Handshake was not sent within jitter duration")
     }
 
     #[test]
@@ -893,7 +905,7 @@ mod tests {
             their_tun.update_timers_at(&mut [], now),
             TunnResult::Done
         ));
-        update_timer_results_in_handshake(&mut my_tun, now);
+        update_timer_results_in_handshake(&mut my_tun, &mut now);
     }
 
     #[test]
@@ -907,7 +919,7 @@ mod tests {
         assert!(matches!(packet, Packet::HandshakeInit(_)));
 
         now += REKEY_TIMEOUT;
-        update_timer_results_in_handshake(&mut my_tun, now)
+        update_timer_results_in_handshake(&mut my_tun, &mut now)
     }
 
     #[test]
