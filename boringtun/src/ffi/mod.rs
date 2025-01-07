@@ -296,6 +296,7 @@ pub unsafe extern "C" fn new_tunnel(
         keep_alive,
         index,
         None,
+        rand::random(),
         Instant::now(),
     )));
 

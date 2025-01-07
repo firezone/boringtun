@@ -335,6 +335,7 @@ impl Device {
             keepalive,
             next_index,
             None,
+            rand::random(),
             Instant::now(),
         );
 

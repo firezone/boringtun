@@ -207,11 +207,13 @@ impl Tunn {
             persistent_keepalive,
             index,
             rate_limiter,
+            rand::random(),
             Instant::now(),
         )
     }
 
     /// Create a new tunnel using own private key and the peer public key
+    #[expect(clippy::too_many_arguments, reason = "We don't care that much.")]
     pub fn new_at(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
@@ -219,6 +221,7 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
+        rng_seed: u64,
         now: Instant,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
@@ -238,12 +241,7 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: VecDeque::new(),
-            timers: Timers::new(
-                persistent_keepalive,
-                rate_limiter.is_none(),
-                index as u64,
-                now,
-            ),
+            timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), rng_seed, now),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
                 Arc::new(RateLimiter::new_at(
@@ -717,6 +715,7 @@ mod tests {
             None,
             my_idx,
             None,
+            rand::random(),
             now,
         );
 
@@ -727,6 +726,7 @@ mod tests {
             None,
             their_idx,
             None,
+            rand::random(),
             now,
         );
 
