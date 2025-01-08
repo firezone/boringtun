@@ -153,7 +153,7 @@ impl Tunn {
         self.timers.clear(Instant::now());
     }
 
-    fn update_session_timers(&mut self, now: Instant) {
+    pub fn update_session_timers(&mut self, now: Instant) {
         let timers = &mut self.timers;
 
         for (i, t) in timers.session_timers.iter_mut().enumerate() {

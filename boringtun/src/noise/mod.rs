@@ -310,6 +310,8 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> TunnResult<'a> {
+        self.update_session_timers(now); // Update timers to avoid sending data on expired sessions.
+
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
