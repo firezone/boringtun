@@ -84,6 +84,10 @@ impl Timers {
         self[TimeSessionEstablished] + REJECT_AFTER_TIME * 3
     }
 
+    pub(crate) fn rekey_attempt_time(&self) -> Instant {
+        self[TimeLastHandshakeStarted] + REKEY_ATTEMPT_TIME
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -251,7 +255,8 @@ impl Tunn {
 
         if let Some(rekey_timeout) = self.handshake.rekey_timeout() {
             // Handshake Initiation Retransmission
-            if now - handshake_started >= REKEY_ATTEMPT_TIME {
+            // Only applies if we initiated a handshake (and thus `rekey_timeout` is `Some`)
+            if now >= self.timers.rekey_attempt_time() {
                 // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
                 // the retries give up and cease, and clear all existing packets queued
                 // up to be sent. If a packet is explicitly queued up to be sent, then
