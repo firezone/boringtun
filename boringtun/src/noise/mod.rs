@@ -486,12 +486,16 @@ impl Tunn {
             debug_assert!(false, "new session should always exist");
             return;
         };
-        let maybe_current = self.sessions[cur_idx % N_SESSIONS].as_ref();
-
-        if maybe_current.is_none_or(|current| new.established_at() > current.established_at()) {
-            self.current = new_idx;
-            tracing::debug!(message = "New session", session = new_idx);
+        if self.sessions[cur_idx % N_SESSIONS]
+            .as_ref()
+            .is_some_and(|current| current.established_at() > new.established_at())
+        {
+            // The current session is "newer" than the new one, don't update.
+            return;
         }
+
+        self.current = new_idx;
+        tracing::debug!(message = "New session", session = new_idx);
     }
 
     /// Decrypts a data packet, and stores the decapsulated packet in dst.
