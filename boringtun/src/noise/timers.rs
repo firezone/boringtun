@@ -53,7 +53,9 @@ pub struct Timers {
     time_started: Instant,
     timers: [Duration; TimerName::Top as usize],
     /// When a certain session was created.
-    pub(super) session_timers: [Duration; super::N_SESSIONS],
+    ///
+    /// `None` if the current session doesn't exist.
+    pub(super) session_timers: [Option<Duration>; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
     /// Did we send data without hearing back?
@@ -142,7 +144,7 @@ impl Tunn {
     ) {
         self.timer_tick(TimeSessionEstablished);
         self.timers.session_timers[session_idx % crate::noise::N_SESSIONS] =
-            self.timers[TimeCurrent];
+            Some(self.timers[TimeCurrent]);
         self.timers.is_initiator = is_initiator;
     }
 
@@ -161,7 +163,11 @@ impl Tunn {
     fn update_session_timers(&mut self, now: Duration) {
         let timers = &mut self.timers;
 
-        for (i, session_start) in timers.session_timers.iter_mut().enumerate() {
+        for (i, maybe_session_start) in timers.session_timers.iter_mut().enumerate() {
+            let Some(session_start) = maybe_session_start else {
+                continue;
+            };
+
             if now - *session_start > REJECT_AFTER_TIME {
                 if let Some(session) = self.sessions[i].take() {
                     tracing::debug!(
@@ -169,7 +175,7 @@ impl Tunn {
                         session = session.receiving_index
                     );
                 }
-                *session_start = now;
+                *maybe_session_start = None;
             }
         }
     }
