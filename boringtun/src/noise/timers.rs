@@ -245,6 +245,13 @@ impl Tunn {
         }
     }
 
+    fn next_expired_session(&self) -> Option<Instant> {
+        self.sessions
+            .iter()
+            .flat_map(|s| Some(s.as_ref()?.established_at() + REJECT_AFTER_TIME))
+            .min()
+    }
+
     #[deprecated(note = "Prefer `Timers::update_timers_at` to avoid time-impurity")]
     pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
         self.update_timers_at(dst, Instant::now())
@@ -428,10 +435,35 @@ impl Tunn {
     ///
     /// If this returns `None`, you may call it at your usual desired precision (usually once a second is enough).
     pub fn next_timer_update(&self) -> Option<Instant> {
-        iter::empty()
-            .chain(self.timers.send_handshake_at)
-            .chain(self.timers.last_data_received_without_reply)
-            .min()
+        // Mimic the `update_timers_at` function: If we have a handshake scheduled, other timers don't matter.
+        if let Some(scheduled_handshake) = self.timers.send_handshake_at {
+            return Some(scheduled_handshake);
+        }
+
+        let common_timers = iter::empty()
+            .chain(self.next_expired_session())
+            .chain(self.handshake.cookie_expiration())
+            .chain(Some(self.timers.reject_after_time()));
+
+        if let Some((rekey_timeout, _)) = self.handshake.rekey_timeout() {
+            common_timers
+                .chain(Some(rekey_timeout))
+                .chain(Some(self.timers.rekey_attempt_time()))
+                .min()
+        } else {
+            // Persistent keep-alive only makes sense if the current session is active.
+            let persistent_keepalive = self.sessions[self.current % N_SESSIONS]
+                .as_ref()
+                .and_then(|_| self.timers.next_persistent_keepalive());
+
+            common_timers
+                .chain(self.timers.rekey_after_time_on_send())
+                .chain(self.timers.reject_after_time_on_receive())
+                .chain(self.timers.rekey_after_time_without_response())
+                .chain(self.timers.keepalive_after_time_without_send())
+                .chain(persistent_keepalive)
+                .min()
+        }
     }
 
     #[deprecated(note = "Prefer `Tunn::time_since_last_handshake_at` to avoid time-impurity")]
