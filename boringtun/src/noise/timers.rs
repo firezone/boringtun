@@ -97,6 +97,11 @@ impl Timers {
     }
 
     pub(crate) fn rekey_after_time_on_send(&self) -> Option<Instant> {
+        if !self.is_initiator {
+            // If we aren't the initiator of the current session, this timer does not matter.
+            return None;
+        }
+
         let session_established = self[TimeSessionEstablished];
 
         if session_established >= self[TimeLastDataPacketSent] {
@@ -108,6 +113,11 @@ impl Timers {
     }
 
     pub(crate) fn reject_after_time_on_receive(&self) -> Option<Instant> {
+        if !self.is_initiator {
+            // If we aren't the initiator of the current session, this timer does not matter.
+            return None;
+        }
+
         let session_established = self[TimeSessionEstablished];
 
         if session_established >= self[TimeLastDataPacketReceived] {
@@ -325,35 +335,33 @@ impl Tunn {
                 handshake_initiation_required = true;
             }
         } else {
-            if self.timers.is_initiator() {
-                // After sending a packet, if the sender was the original initiator
-                // of the handshake and if the current session key is REKEY_AFTER_TIME
-                // ms old, we initiate a new handshake. If the sender was the original
-                // responder of the handshake, it does not re-initiate a new handshake
-                // after REKEY_AFTER_TIME ms like the original initiator does.
-                if self
-                    .timers
-                    .rekey_after_time_on_send()
-                    .is_some_and(|deadline| now >= deadline)
-                {
-                    tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
-                    handshake_initiation_required = true;
-                }
+            // After sending a packet, if the sender was the original initiator
+            // of the handshake and if the current session key is REKEY_AFTER_TIME
+            // ms old, we initiate a new handshake. If the sender was the original
+            // responder of the handshake, it does not re-initiate a new handshake
+            // after REKEY_AFTER_TIME ms like the original initiator does.
+            if self
+                .timers
+                .rekey_after_time_on_send()
+                .is_some_and(|deadline| now >= deadline)
+            {
+                tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
+                handshake_initiation_required = true;
+            }
 
-                // After receiving a packet, if the receiver was the original initiator
-                // of the handshake and if the current session key is REJECT_AFTER_TIME
-                // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
-                // handshake.
-                if self
-                    .timers
-                    .reject_after_time_on_receive()
-                    .is_some_and(|deadline| now >= deadline)
-                {
-                    tracing::debug!(
-                        "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))"
-                    );
-                    handshake_initiation_required = true;
-                }
+            // After receiving a packet, if the receiver was the original initiator
+            // of the handshake and if the current session key is REJECT_AFTER_TIME
+            // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
+            // handshake.
+            if self
+                .timers
+                .reject_after_time_on_receive()
+                .is_some_and(|deadline| now >= deadline)
+            {
+                tracing::debug!(
+                    "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))"
+                );
+                handshake_initiation_required = true;
             }
 
             // If we have sent a packet to a given peer but have not received a
