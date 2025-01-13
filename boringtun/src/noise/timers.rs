@@ -157,9 +157,7 @@ impl Tunn {
     }
 
     fn expire_sessions(&mut self, now: Instant) {
-        let timers = &mut self.timers;
-
-        for (i, maybe_session_start) in timers.session_timers.iter_mut().enumerate() {
+        for (i, maybe_session_start) in self.timers.session_timers.iter_mut().enumerate() {
             let Some(session_start) = maybe_session_start else {
                 continue;
             };
