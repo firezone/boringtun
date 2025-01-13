@@ -158,18 +158,18 @@ impl Tunn {
         self.timers.clear(Instant::now());
     }
 
-    fn update_session_timers(&mut self, time_now: Duration) {
+    fn update_session_timers(&mut self, now: Duration) {
         let timers = &mut self.timers;
 
-        for (i, t) in timers.session_timers.iter_mut().enumerate() {
-            if time_now - *t > REJECT_AFTER_TIME {
+        for (i, session_start) in timers.session_timers.iter_mut().enumerate() {
+            if now - *session_start > REJECT_AFTER_TIME {
                 if let Some(session) = self.sessions[i].take() {
                     tracing::debug!(
                         message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
                         session = session.receiving_index
                     );
                 }
-                *t = time_now;
+                *session_start = now;
             }
         }
     }
