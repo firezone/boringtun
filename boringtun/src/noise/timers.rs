@@ -52,6 +52,7 @@ pub struct Timers {
     /// Start time of the tunnel
     time_started: Instant,
     timers: [Duration; TimerName::Top as usize],
+    /// When a certain session was created.
     pub(super) session_timers: [Duration; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
