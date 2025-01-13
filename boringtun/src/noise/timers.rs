@@ -156,7 +156,7 @@ impl Tunn {
         self.timers.clear(Instant::now());
     }
 
-    fn update_session_timers(&mut self, now: Instant) {
+    fn expire_sessions(&mut self, now: Instant) {
         let timers = &mut self.timers;
 
         for (i, maybe_session_start) in timers.session_timers.iter_mut().enumerate() {
@@ -211,9 +211,9 @@ impl Tunn {
 
         self.timers[TimeCurrent] = now;
 
-        self.update_session_timers(now);
+        self.expire_sessions(now);
 
-        // Updating the session timer may expire our session, trigger a new one in that case but only iff we initiated the previous one.
+        // In case our session expired, create a new one iff we initiated the previous one.
         if self.sessions[self.current % N_SESSIONS].is_none()
             && !self.handshake.is_in_progress()
             && self.timers.is_initiator()
