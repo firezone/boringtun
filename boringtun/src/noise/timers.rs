@@ -278,13 +278,6 @@ impl Tunn {
             handshake_initiation_required = true;
         }
 
-        // Load timers only once:
-        let session_established = self.timers[TimeSessionEstablished];
-        let handshake_started = self.timers[TimeLastHandshakeStarted];
-        let data_packet_received = self.timers[TimeLastDataPacketReceived];
-        let data_packet_sent = self.timers[TimeLastDataPacketSent];
-        let persistent_keepalive = self.timers.persistent_keepalive;
-
         if self.handshake.is_expired() {
             return TunnResult::Err(WireGuardError::ConnectionExpired);
         }
