@@ -110,6 +110,12 @@ impl Timers {
         Some(session_established + REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT)
     }
 
+    pub(crate) fn rekey_after_time_without_response(&self) -> Option<Instant> {
+        let first_packet_without_reply = self.want_handshake_since?;
+
+        Some(first_packet_without_reply + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -335,8 +341,8 @@ impl Tunn {
             // we initiate a new handshake.
             if self
                 .timers
-                .want_handshake_since
-                .is_some_and(|sent_at| now >= sent_at + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                .rekey_after_time_without_response()
+                .is_some_and(|deadline| now >= deadline)
             {
                 tracing::debug!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                 handshake_initiation_required = true;
