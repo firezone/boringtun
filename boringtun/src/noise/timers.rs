@@ -111,6 +111,17 @@ impl Timers {
         Some(session_established + REKEY_AFTER_TIME)
     }
 
+    pub(crate) fn reject_after_time_on_receive(&self) -> Option<Instant> {
+        let session_established = self[TimeSessionEstablished];
+
+        if session_established >= self[TimeLastDataPacketReceived] {
+            // If we haven't received any data yet, this timer doesn't matter.
+            return None;
+        }
+
+        Some(session_established + REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT)
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -324,9 +335,10 @@ impl Tunn {
                 // of the handshake and if the current session key is REJECT_AFTER_TIME
                 // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
                 // handshake.
-                if session_established < data_packet_received
-                    && now - session_established
-                        >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
+                if self
+                    .timers
+                    .reject_after_time_on_receive()
+                    .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!(
                         "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))"
