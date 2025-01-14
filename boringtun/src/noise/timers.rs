@@ -60,10 +60,8 @@ pub struct Timers {
     ///
     /// If `Some`, tracks the timestamp when we want to send a keepalive.
     want_passive_keepalive_at: Option<Instant>,
-    /// Did we send data without hearing back?
-    ///
-    /// If `Some`, tracks the timestamp when we want to initiate the new handshake.
-    want_handshake_at: Option<Instant>,
+    /// The earliest data packet we sent without receiving a reply.
+    first_data_sent_without_reply: Option<Instant>,
     persistent_keepalive: usize,
     /// Should this timer call reset rr function (if not a shared rr instance)
     pub(super) should_reset_rr: bool,
@@ -84,7 +82,7 @@ impl Timers {
             is_initiator: false,
             timers: [now; TimerName::Top as usize],
             want_passive_keepalive_at: Default::default(),
-            want_handshake_at: Default::default(),
+            first_data_sent_without_reply: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
             send_handshake_at: None,
@@ -122,6 +120,12 @@ impl Timers {
         Some(session_established + REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT)
     }
 
+    pub(crate) fn rekey_after_time_without_response(&self) -> Option<Instant> {
+        let first_packet_without_reply = self.first_data_sent_without_reply?;
+
+        Some(first_packet_without_reply + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -136,7 +140,7 @@ impl Timers {
         for t in &mut self.timers[..] {
             *t = now;
         }
-        self.want_handshake_at = None;
+        self.first_data_sent_without_reply = None;
         self.want_passive_keepalive_at = None;
     }
 }
@@ -158,7 +162,7 @@ impl Tunn {
     pub(super) fn timer_tick(&mut self, timer_name: TimerName, now: Instant) {
         match timer_name {
             TimeLastPacketReceived => {
-                self.timers.want_handshake_at = None;
+                self.timers.first_data_sent_without_reply = None;
             }
             TimeLastPacketSent => {
                 self.timers.want_passive_keepalive_at = None;
@@ -167,16 +171,14 @@ impl Tunn {
                 self.timers.want_passive_keepalive_at = Some(now + KEEPALIVE_TIMEOUT);
             }
             TimeLastDataPacketSent => {
-                match self.timers.want_handshake_at {
+                match self.timers.first_data_sent_without_reply {
                     Some(_) => {
                         // This isn't the first timer tick (i.e. not the first packet)
                         // we haven't received a response to.
                     }
                     None => {
                         // We sent a packet and haven't heard back yet.
-                        // Start a timer for when we want to make a new handshake.
-                        self.timers.want_handshake_at =
-                            Some(now + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                        self.timers.first_data_sent_without_reply = Some(now)
                     }
                 }
             }
@@ -352,8 +354,8 @@ impl Tunn {
             // we initiate a new handshake.
             if self
                 .timers
-                .want_handshake_at
-                .is_some_and(|handshake_at| now >= handshake_at)
+                .rekey_after_time_without_response()
+                .is_some_and(|deadline| now >= deadline)
             {
                 tracing::debug!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                 handshake_initiation_required = true;
