@@ -116,6 +116,22 @@ impl Timers {
         Some(first_packet_without_reply + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
     }
 
+    pub(crate) fn keepalive_after_time_without_send(&self) -> Option<Instant> {
+        if !self.want_keepalive {
+            return None;
+        }
+
+        let last_packet_sent = self[TimeLastPacketSent];
+        let last_data_packet_received = self[TimeLastDataPacketReceived];
+
+        if last_packet_sent >= last_data_packet_received {
+            // If we have sent a packet since we have last received one, this timer doesn't matter.
+            return None;
+        }
+
+        Some(last_packet_sent + KEEPALIVE_TIMEOUT)
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -351,9 +367,10 @@ impl Tunn {
             if !handshake_initiation_required {
                 // If a packet has been received from a given peer, but we have not sent one back
                 // to the given peer in KEEPALIVE ms, we send an empty packet.
-                if data_packet_received > aut_packet_sent
-                    && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                    && mem::replace(&mut self.timers.want_keepalive, false)
+                if self
+                    .timers
+                    .keepalive_after_time_without_send()
+                    .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                     keepalive_required = true;
