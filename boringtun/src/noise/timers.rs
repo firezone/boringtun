@@ -3,7 +3,6 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult, N_SESSIONS};
-use std::mem;
 use std::ops::{Index, IndexMut};
 
 use rand::Rng;
