@@ -92,6 +92,10 @@ impl Timers {
         }
     }
 
+    pub(crate) fn reject_after_time(&self) -> Instant {
+        self[TimeSessionEstablished] + REJECT_AFTER_TIME * 3
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -255,7 +259,7 @@ impl Tunn {
 
         // All ephemeral private keys and symmetric session keys are zeroed out after
         // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
-        if now - session_established >= REJECT_AFTER_TIME * 3 {
+        if now >= self.timers.reject_after_time() {
             tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
             self.handshake.set_expired();
             self.clear_all();
