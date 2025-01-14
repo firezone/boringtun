@@ -262,7 +262,7 @@ impl Tunn {
             return TunnResult::Err(WireGuardError::ConnectionExpired);
         }
 
-        if let Some((time_init_sent, local_idx)) = self.handshake.timer() {
+        if let Some((rekey_timeout, local_idx)) = self.handshake.rekey_timeout() {
             // Handshake Initiation Retransmission
             if now - handshake_started >= REKEY_ATTEMPT_TIME {
                 // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
@@ -275,7 +275,7 @@ impl Tunn {
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
             }
 
-            if now.duration_since(time_init_sent) >= REKEY_TIMEOUT {
+            if now >= rekey_timeout {
                 // We avoid using `time` here, because it can be earlier than `time_init_sent`.
                 // Once `checked_duration_since` is stable we can use that.
                 // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
