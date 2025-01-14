@@ -132,6 +132,16 @@ impl Timers {
         Some(last_packet_sent + KEEPALIVE_TIMEOUT)
     }
 
+    pub(crate) fn next_persistent_keepalive(&self) -> Option<Instant> {
+        let keepalive = Duration::from_secs(self.persistent_keepalive as u64);
+
+        if keepalive.is_zero() {
+            return None;
+        }
+
+        Some(self[TimerName::TimePersistentKeepalive] + keepalive)
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -377,9 +387,10 @@ impl Tunn {
                 }
 
                 // Persistent KEEPALIVE
-                if persistent_keepalive > 0
-                    && (now - self.timers[TimePersistentKeepalive]
-                        >= Duration::from_secs(persistent_keepalive as _))
+                if self
+                    .timers
+                    .next_persistent_keepalive()
+                    .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                     self.timer_tick(TimePersistentKeepalive, now);
@@ -399,7 +410,6 @@ impl Tunn {
                 existing.is_none(),
                 "Should never override existing handshake"
             );
-
             tracing::debug!(?jitter, "Scheduling new handshake");
 
             return TunnResult::Done;
