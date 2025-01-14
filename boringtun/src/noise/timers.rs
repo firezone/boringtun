@@ -100,6 +100,17 @@ impl Timers {
         self[TimeLastHandshakeStarted] + REKEY_ATTEMPT_TIME
     }
 
+    pub(crate) fn rekey_after_time_on_send(&self) -> Option<Instant> {
+        let session_established = self[TimeSessionEstablished];
+
+        if session_established >= self[TimeLastDataPacketSent] {
+            // If we haven't sent any data yet, this timer doesn't matter.
+            return None;
+        }
+
+        Some(session_established + REKEY_AFTER_TIME)
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -300,8 +311,10 @@ impl Tunn {
                 // ms old, we initiate a new handshake. If the sender was the original
                 // responder of the handshake, it does not re-initiate a new handshake
                 // after REKEY_AFTER_TIME ms like the original initiator does.
-                if session_established < data_packet_sent
-                    && now - session_established >= REKEY_AFTER_TIME
+                if self
+                    .timers
+                    .rekey_after_time_on_send()
+                    .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
                     handshake_initiation_required = true;
