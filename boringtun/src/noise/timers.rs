@@ -56,10 +56,8 @@ pub struct Timers {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
     is_initiator: bool,
     timers: [Instant; TimerName::Top as usize],
-    /// Did we receive data without sending anything back?
-    ///
-    /// If `Some`, tracks the timestamp when we want to send a keepalive.
-    want_passive_keepalive_at: Option<Instant>,
+    /// The last data packet we received without sending a reply.
+    last_data_received_without_reply: Option<Instant>,
     /// The earliest data packet we sent without receiving a reply.
     first_data_sent_without_reply: Option<Instant>,
     persistent_keepalive: usize,
@@ -81,7 +79,7 @@ impl Timers {
         Timers {
             is_initiator: false,
             timers: [now; TimerName::Top as usize],
-            want_passive_keepalive_at: Default::default(),
+            last_data_received_without_reply: Default::default(),
             first_data_sent_without_reply: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
@@ -126,6 +124,12 @@ impl Timers {
         Some(first_packet_without_reply + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
     }
 
+    pub(crate) fn keepalive_after_time_without_send(&self) -> Option<Instant> {
+        let last_data_received_without_reply = self.last_data_received_without_reply?;
+
+        Some(last_data_received_without_reply + KEEPALIVE_TIMEOUT)
+    }
+
     fn is_initiator(&self) -> bool {
         self.is_initiator
     }
@@ -141,7 +145,7 @@ impl Timers {
             *t = now;
         }
         self.first_data_sent_without_reply = None;
-        self.want_passive_keepalive_at = None;
+        self.last_data_received_without_reply = None;
     }
 }
 
@@ -165,10 +169,10 @@ impl Tunn {
                 self.timers.first_data_sent_without_reply = None;
             }
             TimeLastPacketSent => {
-                self.timers.want_passive_keepalive_at = None;
+                self.timers.last_data_received_without_reply = None;
             }
             TimeLastDataPacketReceived => {
-                self.timers.want_passive_keepalive_at = Some(now + KEEPALIVE_TIMEOUT);
+                self.timers.last_data_received_without_reply = Some(now);
             }
             TimeLastDataPacketSent => {
                 match self.timers.first_data_sent_without_reply {
@@ -366,8 +370,8 @@ impl Tunn {
                 // to the given peer in KEEPALIVE ms, we send an empty packet.
                 if self
                     .timers
-                    .want_passive_keepalive_at
-                    .is_some_and(|keepalive_at| now >= keepalive_at)
+                    .keepalive_after_time_without_send()
+                    .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                     keepalive_required = true;
@@ -415,7 +419,7 @@ impl Tunn {
     pub fn next_timer_update(&self) -> Option<Instant> {
         iter::empty()
             .chain(self.timers.send_handshake_at)
-            .chain(self.timers.want_passive_keepalive_at)
+            .chain(self.timers.last_data_received_without_reply)
             .min()
     }
 
