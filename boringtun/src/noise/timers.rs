@@ -255,6 +255,21 @@ impl Tunn {
     }
 
     pub fn update_timers_at<'a>(&mut self, dst: &'a mut [u8], now: Instant) -> TunnResult<'a> {
+        tracing::debug!(send_handshake_at = ?self.timers.send_handshake_at);
+        tracing::debug!(next_expired_session = ?self.next_expired_session());
+        tracing::debug!(cookie_expiration = ?self.handshake.cookie_expiration());
+        tracing::debug!(reject_after_time = ?self.timers.reject_after_time());
+
+        tracing::debug!(rekey_timeout = ?self.handshake.rekey_timeout());
+        tracing::debug!(rekey_attempt_time = ?self.timers.rekey_attempt_time());
+
+        tracing::debug!(rekey_after_time_on_send = ?self.timers.rekey_after_time_on_send());
+        tracing::debug!(want_handshake_since = ?self.timers.want_handshake_since);
+        tracing::debug!(reject_after_time_on_receive = ?self.timers.reject_after_time_on_receive());
+        tracing::debug!(rekey_after_time_without_response = ?self.timers.rekey_after_time_without_response());
+        tracing::debug!(keepalive_after_time_without_send = ?self.timers.keepalive_after_time_without_send());
+        tracing::debug!(next_persistent_keepalive = ?self.timers.next_persistent_keepalive());
+
         if let Some(scheduled_handshake_at) = self.timers.send_handshake_at {
             // If we have scheduled a handshake and the deadline expired, send it immediately.
             if now >= scheduled_handshake_at {
