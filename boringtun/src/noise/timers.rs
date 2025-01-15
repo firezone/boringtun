@@ -114,8 +114,10 @@ impl Tunn {
                 self.timers.want_handshake = false;
             }
             TimeLastPacketSent => {
-                self.timers.want_handshake = true;
                 self.timers.want_keepalive = false;
+            }
+            TimeLastDataPacketSent => {
+                self.timers.want_handshake = true;
             }
             _ => {}
         }
