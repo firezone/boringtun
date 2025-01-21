@@ -3,7 +3,6 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult, N_SESSIONS};
-use std::mem;
 use std::ops::{Index, IndexMut};
 
 use rand::Rng;
@@ -78,6 +77,78 @@ impl Timers {
             send_handshake_at: None,
             jitter_rng: StdRng::seed_from_u64(rng_seed),
         }
+    }
+
+    pub(crate) fn reject_after_time(&self) -> Instant {
+        self[TimeSessionEstablished] + REJECT_AFTER_TIME * 3
+    }
+
+    pub(crate) fn rekey_attempt_time(&self) -> Instant {
+        self[TimeLastHandshakeStarted] + REKEY_ATTEMPT_TIME
+    }
+
+    pub(crate) fn rekey_after_time_on_send(&self) -> Option<Instant> {
+        if !self.is_initiator {
+            // If we aren't the initiator of the current session, this timer does not matter.
+            return None;
+        }
+
+        let session_established = self[TimeSessionEstablished];
+
+        if session_established >= self[TimeLastDataPacketSent] {
+            // If we haven't sent any data yet, this timer doesn't matter.
+            return None;
+        }
+
+        Some(session_established + REKEY_AFTER_TIME)
+    }
+
+    pub(crate) fn reject_after_time_on_receive(&self) -> Option<Instant> {
+        if !self.is_initiator {
+            // If we aren't the initiator of the current session, this timer does not matter.
+            return None;
+        }
+
+        let session_established = self[TimeSessionEstablished];
+
+        if session_established >= self[TimeLastDataPacketReceived] {
+            // If we haven't received any data yet, this timer doesn't matter.
+            return None;
+        }
+
+        Some(session_established + REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT)
+    }
+
+    pub(crate) fn rekey_after_time_without_response(&self) -> Option<Instant> {
+        let first_packet_without_reply = self.want_handshake_since?;
+
+        Some(first_packet_without_reply + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+    }
+
+    pub(crate) fn keepalive_after_time_without_send(&self) -> Option<Instant> {
+        if !self.want_keepalive {
+            return None;
+        }
+
+        let last_packet_sent = self[TimeLastPacketSent];
+        let last_data_packet_received = self[TimeLastDataPacketReceived];
+
+        if last_packet_sent >= last_data_packet_received {
+            // If we have sent a packet since we have last received one, this timer doesn't matter.
+            return None;
+        }
+
+        Some(last_packet_sent + KEEPALIVE_TIMEOUT)
+    }
+
+    pub(crate) fn next_persistent_keepalive(&self) -> Option<Instant> {
+        let keepalive = Duration::from_secs(self.persistent_keepalive as u64);
+
+        if keepalive.is_zero() {
+            return None;
+        }
+
+        Some(self[TimerName::TimePersistentKeepalive] + keepalive)
     }
 
     fn is_initiator(&self) -> bool {
@@ -171,12 +242,34 @@ impl Tunn {
         }
     }
 
+    fn next_expired_session(&self) -> Option<Instant> {
+        self.sessions
+            .iter()
+            .flat_map(|s| Some(s.as_ref()?.established_at() + REJECT_AFTER_TIME))
+            .min()
+    }
+
     #[deprecated(note = "Prefer `Timers::update_timers_at` to avoid time-impurity")]
     pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
         self.update_timers_at(dst, Instant::now())
     }
 
     pub fn update_timers_at<'a>(&mut self, dst: &'a mut [u8], now: Instant) -> TunnResult<'a> {
+        tracing::debug!(send_handshake_at = ?self.timers.send_handshake_at);
+        tracing::debug!(next_expired_session = ?self.next_expired_session());
+        tracing::debug!(cookie_expiration = ?self.handshake.cookie_expiration());
+        tracing::debug!(reject_after_time = ?self.timers.reject_after_time());
+
+        tracing::debug!(rekey_timeout = ?self.handshake.rekey_timeout());
+        tracing::debug!(rekey_attempt_time = ?self.timers.rekey_attempt_time());
+
+        tracing::debug!(rekey_after_time_on_send = ?self.timers.rekey_after_time_on_send());
+        tracing::debug!(want_handshake_since = ?self.timers.want_handshake_since);
+        tracing::debug!(reject_after_time_on_receive = ?self.timers.reject_after_time_on_receive());
+        tracing::debug!(rekey_after_time_without_response = ?self.timers.rekey_after_time_without_response());
+        tracing::debug!(keepalive_after_time_without_send = ?self.timers.keepalive_after_time_without_send());
+        tracing::debug!(next_persistent_keepalive = ?self.timers.next_persistent_keepalive());
+
         if let Some(scheduled_handshake_at) = self.timers.send_handshake_at {
             // If we have scheduled a handshake and the deadline expired, send it immediately.
             if now >= scheduled_handshake_at {
@@ -214,14 +307,6 @@ impl Tunn {
             handshake_initiation_required = true;
         }
 
-        // Load timers only once:
-        let session_established = self.timers[TimeSessionEstablished];
-        let handshake_started = self.timers[TimeLastHandshakeStarted];
-        let aut_packet_sent = self.timers[TimeLastPacketSent];
-        let data_packet_received = self.timers[TimeLastDataPacketReceived];
-        let data_packet_sent = self.timers[TimeLastDataPacketSent];
-        let persistent_keepalive = self.timers.persistent_keepalive;
-
         if self.handshake.is_expired() {
             return TunnResult::Err(WireGuardError::ConnectionExpired);
         }
@@ -238,16 +323,17 @@ impl Tunn {
 
         // All ephemeral private keys and symmetric session keys are zeroed out after
         // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
-        if now - session_established >= REJECT_AFTER_TIME * 3 {
+        if now >= self.timers.reject_after_time() {
             tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
             self.handshake.set_expired();
             self.clear_all();
             return TunnResult::Err(WireGuardError::ConnectionExpired);
         }
 
-        if let Some(time_init_sent) = self.handshake.timer() {
+        if let Some(rekey_timeout) = self.handshake.rekey_timeout() {
             // Handshake Initiation Retransmission
-            if now - handshake_started >= REKEY_ATTEMPT_TIME {
+            // Only applies if we initiated a handshake (and thus `rekey_timeout` is `Some`)
+            if now >= self.timers.rekey_attempt_time() {
                 // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
                 // the retries give up and cease, and clear all existing packets queued
                 // up to be sent. If a packet is explicitly queued up to be sent, then
@@ -258,7 +344,7 @@ impl Tunn {
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
             }
 
-            if now.duration_since(time_init_sent) >= REKEY_TIMEOUT {
+            if now >= rekey_timeout {
                 // We avoid using `time` here, because it can be earlier than `time_init_sent`.
                 // Once `checked_duration_since` is stable we can use that.
                 // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
@@ -268,32 +354,33 @@ impl Tunn {
                 handshake_initiation_required = true;
             }
         } else {
-            if self.timers.is_initiator() {
-                // After sending a packet, if the sender was the original initiator
-                // of the handshake and if the current session key is REKEY_AFTER_TIME
-                // ms old, we initiate a new handshake. If the sender was the original
-                // responder of the handshake, it does not re-initiate a new handshake
-                // after REKEY_AFTER_TIME ms like the original initiator does.
-                if session_established < data_packet_sent
-                    && now - session_established >= REKEY_AFTER_TIME
-                {
-                    tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
-                    handshake_initiation_required = true;
-                }
+            // After sending a packet, if the sender was the original initiator
+            // of the handshake and if the current session key is REKEY_AFTER_TIME
+            // ms old, we initiate a new handshake. If the sender was the original
+            // responder of the handshake, it does not re-initiate a new handshake
+            // after REKEY_AFTER_TIME ms like the original initiator does.
+            if self
+                .timers
+                .rekey_after_time_on_send()
+                .is_some_and(|deadline| now >= deadline)
+            {
+                tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
+                handshake_initiation_required = true;
+            }
 
-                // After receiving a packet, if the receiver was the original initiator
-                // of the handshake and if the current session key is REJECT_AFTER_TIME
-                // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
-                // handshake.
-                if session_established < data_packet_received
-                    && now - session_established
-                        >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
-                {
-                    tracing::debug!(
-                        "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))"
-                    );
-                    handshake_initiation_required = true;
-                }
+            // After receiving a packet, if the receiver was the original initiator
+            // of the handshake and if the current session key is REJECT_AFTER_TIME
+            // - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT ms old, we initiate a new
+            // handshake.
+            if self
+                .timers
+                .reject_after_time_on_receive()
+                .is_some_and(|deadline| now >= deadline)
+            {
+                tracing::debug!(
+                    "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))"
+                );
+                handshake_initiation_required = true;
             }
 
             // If we have sent a packet to a given peer but have not received a
@@ -301,8 +388,8 @@ impl Tunn {
             // we initiate a new handshake.
             if self
                 .timers
-                .want_handshake_since
-                .is_some_and(|sent_at| now >= sent_at + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                .rekey_after_time_without_response()
+                .is_some_and(|deadline| now >= deadline)
             {
                 tracing::debug!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                 handshake_initiation_required = true;
@@ -311,18 +398,20 @@ impl Tunn {
             if !handshake_initiation_required {
                 // If a packet has been received from a given peer, but we have not sent one back
                 // to the given peer in KEEPALIVE ms, we send an empty packet.
-                if data_packet_received > aut_packet_sent
-                    && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                    && mem::replace(&mut self.timers.want_keepalive, false)
+                if self
+                    .timers
+                    .keepalive_after_time_without_send()
+                    .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                     keepalive_required = true;
                 }
 
                 // Persistent KEEPALIVE
-                if persistent_keepalive > 0
-                    && (now - self.timers[TimePersistentKeepalive]
-                        >= Duration::from_secs(persistent_keepalive as _))
+                if self
+                    .timers
+                    .next_persistent_keepalive()
+                    .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                     self.timer_tick(TimePersistentKeepalive, now);
@@ -342,7 +431,6 @@ impl Tunn {
                 existing.is_none(),
                 "Should never override existing handshake"
             );
-
             tracing::debug!(?jitter, "Scheduling new handshake");
 
             return TunnResult::Done;
@@ -359,7 +447,36 @@ impl Tunn {
     ///
     /// If this returns `None`, you may call it at your usual desired precision (usually once a second is enough).
     pub fn next_timer_update(&self) -> Option<Instant> {
-        self.timers.send_handshake_at
+        // Mimic the `update_timers_at` function: If we have a handshake scheduled, other timers don't matter.
+        if let Some(scheduled_handshake) = self.timers.send_handshake_at {
+            return Some(scheduled_handshake);
+        }
+
+        let common_timers = [
+            self.next_expired_session(),
+            self.handshake.cookie_expiration(),
+            Some(self.timers.reject_after_time()),
+        ]
+        .into_iter();
+
+        if let Some(rekey_timeout) = self.handshake.rekey_timeout() {
+            earliest(
+                common_timers.chain([Some(rekey_timeout), Some(self.timers.rekey_attempt_time())]),
+            )
+        } else {
+            // Persistent keep-alive only makes sense if the current session is active.
+            let persistent_keepalive = self.sessions[self.current % N_SESSIONS]
+                .as_ref()
+                .and_then(|_| self.timers.next_persistent_keepalive());
+
+            earliest(common_timers.chain([
+                self.timers.rekey_after_time_on_send(),
+                self.timers.reject_after_time_on_receive(),
+                self.timers.rekey_after_time_without_response(),
+                self.timers.keepalive_after_time_without_send(),
+                persistent_keepalive,
+            ]))
+        }
     }
 
     #[deprecated(note = "Prefer `Tunn::time_since_last_handshake_at` to avoid time-impurity")]
@@ -387,4 +504,8 @@ impl Tunn {
             None
         }
     }
+}
+
+fn earliest(instants: impl IntoIterator<Item = Option<Instant>>) -> Option<Instant> {
+    instants.into_iter().flatten().min()
 }
