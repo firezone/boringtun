@@ -161,7 +161,7 @@ impl Tunn {
                 continue;
             };
 
-            if now.duration_since(session.established_at()) > REJECT_AFTER_TIME {
+            if session.expired_at(now) {
                 tracing::debug!(
                     message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
                     session = session.receiving_index
