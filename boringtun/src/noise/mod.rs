@@ -313,7 +313,7 @@ impl Tunn {
         let current = self.current;
         if let Some(session) = self.sessions[current % N_SESSIONS]
             .as_ref()
-            .filter(|s| s.should_use_at(now))
+            .filter(|s| s.should_use_at(now) || self.timers.is_responder())
         {
             // Send the packet using an established session
             let packet = match session.format_packet_data(src, dst) {
@@ -985,6 +985,28 @@ mod tests {
         assert!(matches!(
             Tunn::parse_incoming_packet(data).unwrap(),
             Packet::HandshakeInit(_)
+        ));
+    }
+
+    #[test]
+    fn responder_can_still_use_almost_expired_session() {
+        let mut now = Instant::now();
+
+        let (_initiator_tun, mut resonder_tun) = create_two_tuns_and_handshake(now);
+        let mut responder_tun = [0u8; 1024];
+
+        now += SHOULD_NOT_USE_AFTER_TIME + Duration::from_secs(1);
+
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let data = resonder_tun.encapsulate_at(&sent_packet_buf, &mut responder_tun, now);
+
+        let TunnResult::WriteToNetwork(data) = data else {
+            panic!("Expected `WriteToNetwork`")
+        };
+
+        assert!(matches!(
+            Tunn::parse_incoming_packet(data).unwrap(),
+            Packet::PacketData(_)
         ));
     }
 

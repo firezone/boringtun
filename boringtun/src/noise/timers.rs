@@ -94,6 +94,10 @@ impl Timers {
         self.is_initiator
     }
 
+    pub(crate) fn is_responder(&self) -> bool {
+        !self.is_initiator()
+    }
+
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&mut self, now: Instant) {
