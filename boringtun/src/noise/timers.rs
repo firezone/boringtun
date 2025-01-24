@@ -126,11 +126,13 @@ impl Tunn {
     pub(super) fn timer_tick(&mut self, timer_name: TimerName, now: Instant) {
         match timer_name {
             TimeLastPacketReceived => {
-                self.timers.want_keepalive = true;
                 self.timers.want_handshake_at = None;
             }
             TimeLastPacketSent => {
                 self.timers.want_keepalive = false;
+            }
+            TimeLastDataPacketReceived => {
+                self.timers.want_keepalive = true;
             }
             TimeLastDataPacketSent => {
                 match self.timers.want_handshake_at {
@@ -325,8 +327,7 @@ impl Tunn {
             if !handshake_initiation_required {
                 // If a packet has been received from a given peer, but we have not sent one back
                 // to the given peer in KEEPALIVE ms, we send an empty packet.
-                if data_packet_received > aut_packet_sent
-                    && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
+                if now - aut_packet_sent >= KEEPALIVE_TIMEOUT
                     && mem::replace(&mut self.timers.want_keepalive, false)
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
