@@ -401,4 +401,9 @@ impl Tunn {
             None
         }
     }
+
+    #[cfg(test)]
+    pub fn set_persistent_keepalive(&mut self, keepalive: u16) {
+        self.timers.persistent_keepalive = keepalive as usize;
+    }
 }
