@@ -3,7 +3,6 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult, N_SESSIONS};
-use std::mem;
 use std::ops::{Index, IndexMut};
 
 use rand::Rng;
@@ -327,8 +326,7 @@ impl Tunn {
             if !handshake_initiation_required {
                 // If a packet has been received from a given peer, but we have not sent one back
                 // to the given peer in KEEPALIVE ms, we send an empty packet.
-                if now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                    && mem::replace(&mut self.timers.want_passive_keepalive, false)
+                if now - aut_packet_sent >= KEEPALIVE_TIMEOUT && self.timers.want_passive_keepalive
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                     keepalive_required = true;
