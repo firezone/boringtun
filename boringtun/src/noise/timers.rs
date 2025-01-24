@@ -57,7 +57,7 @@ pub struct Timers {
     is_initiator: bool,
     timers: [Instant; TimerName::Top as usize],
     /// Did we receive data without sending anything back?
-    want_keepalive: bool,
+    want_passive_keepalive: bool,
     /// Did we send data without hearing back?
     ///
     /// If `Some`, tracks the timestamp when we want to initiate the new handshake.
@@ -81,7 +81,7 @@ impl Timers {
         Timers {
             is_initiator: false,
             timers: [now; TimerName::Top as usize],
-            want_keepalive: Default::default(),
+            want_passive_keepalive: Default::default(),
             want_handshake_at: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
@@ -105,7 +105,7 @@ impl Timers {
             *t = now;
         }
         self.want_handshake_at = None;
-        self.want_keepalive = false;
+        self.want_passive_keepalive = false;
     }
 }
 
@@ -129,10 +129,10 @@ impl Tunn {
                 self.timers.want_handshake_at = None;
             }
             TimeLastPacketSent => {
-                self.timers.want_keepalive = false;
+                self.timers.want_passive_keepalive = false;
             }
             TimeLastDataPacketReceived => {
-                self.timers.want_keepalive = true;
+                self.timers.want_passive_keepalive = true;
             }
             TimeLastDataPacketSent => {
                 match self.timers.want_handshake_at {
@@ -328,7 +328,7 @@ impl Tunn {
                 // If a packet has been received from a given peer, but we have not sent one back
                 // to the given peer in KEEPALIVE ms, we send an empty packet.
                 if now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                    && mem::replace(&mut self.timers.want_keepalive, false)
+                    && mem::replace(&mut self.timers.want_passive_keepalive, false)
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                     keepalive_required = true;
