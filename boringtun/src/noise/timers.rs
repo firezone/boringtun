@@ -56,7 +56,9 @@ pub struct Timers {
     is_initiator: bool,
     timers: [Instant; TimerName::Top as usize],
     /// Did we receive data without sending anything back?
-    want_passive_keepalive: bool,
+    ///
+    /// If `Some`, tracks the timestamp when we want to send a keepalive.
+    want_passive_keepalive_at: Option<Instant>,
     /// Did we send data without hearing back?
     ///
     /// If `Some`, tracks the timestamp when we want to initiate the new handshake.
@@ -80,7 +82,7 @@ impl Timers {
         Timers {
             is_initiator: false,
             timers: [now; TimerName::Top as usize],
-            want_passive_keepalive: Default::default(),
+            want_passive_keepalive_at: Default::default(),
             want_handshake_at: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             should_reset_rr: reset_rr,
@@ -104,7 +106,7 @@ impl Timers {
             *t = now;
         }
         self.want_handshake_at = None;
-        self.want_passive_keepalive = false;
+        self.want_passive_keepalive_at = None;
     }
 }
 
@@ -128,10 +130,10 @@ impl Tunn {
                 self.timers.want_handshake_at = None;
             }
             TimeLastPacketSent => {
-                self.timers.want_passive_keepalive = false;
+                self.timers.want_passive_keepalive_at = None;
             }
             TimeLastDataPacketReceived => {
-                self.timers.want_passive_keepalive = true;
+                self.timers.want_passive_keepalive_at = Some(now + KEEPALIVE_TIMEOUT);
             }
             TimeLastDataPacketSent => {
                 match self.timers.want_handshake_at {
@@ -232,7 +234,6 @@ impl Tunn {
         // Load timers only once:
         let session_established = self.timers[TimeSessionEstablished];
         let handshake_started = self.timers[TimeLastHandshakeStarted];
-        let aut_packet_sent = self.timers[TimeLastPacketSent];
         let data_packet_received = self.timers[TimeLastDataPacketReceived];
         let data_packet_sent = self.timers[TimeLastDataPacketSent];
         let persistent_keepalive = self.timers.persistent_keepalive;
@@ -326,7 +327,10 @@ impl Tunn {
             if !handshake_initiation_required {
                 // If a packet has been received from a given peer, but we have not sent one back
                 // to the given peer in KEEPALIVE ms, we send an empty packet.
-                if now - aut_packet_sent >= KEEPALIVE_TIMEOUT && self.timers.want_passive_keepalive
+                if self
+                    .timers
+                    .want_passive_keepalive_at
+                    .is_some_and(|keepalive_at| now >= keepalive_at)
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                     keepalive_required = true;
