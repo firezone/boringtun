@@ -8,8 +8,17 @@ version = "0.5.0-pre.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebd885afa9fa966b7715dc1c46bf47330b9156eec79a09d2003c5af03d153ba0"
 dependencies = [
- "crypto-common",
+ "crypto-common 0.1.5",
  "generic-array",
+]
+
+[[package]]
+name = "aead"
+version = "0.6.0-rc.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5f451b77e2f92932dc411da6ef9f3d33efad68a6f14a7a83e559453458e85ac"
+dependencies = [
+ "crypto-common 0.2.0-rc.2",
 ]
 
 [[package]]
@@ -87,7 +96,7 @@ dependencies = [
 name = "boringtun"
 version = "0.6.1"
 dependencies = [
- "aead",
+ "aead 0.6.0-rc.0",
  "base64",
  "blake2",
  "chacha20poly1305",
@@ -197,7 +206,7 @@ version = "0.10.0-pre.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa5c8884b2dd73aa47cd73fff4ebee4f962cb9b8b07eba70251500e9fd756832"
 dependencies = [
- "aead",
+ "aead 0.5.0-pre.2",
  "chacha20",
  "cipher",
  "poly1305",
@@ -237,7 +246,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1873270f8f7942c191139cb8a40fd228da6c3fd2fc376d7e92d47aa14aeb59e"
 dependencies = [
- "crypto-common",
+ "crypto-common 0.1.5",
  "inout",
  "zeroize",
 ]
@@ -399,8 +408,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ccfd8c0ee4cce11e45b3fd6f9d5e69e0cc62912aa6a0cb1bf4617b0eba5a12f"
 dependencies = [
  "generic-array",
- "rand_core",
  "typenum",
+]
+
+[[package]]
+name = "crypto-common"
+version = "0.2.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "170d71b5b14dec99db7739f6fc7d6ec2db80b78c3acb77db48392ccc3d8a9ea0"
+dependencies = [
+ "hybrid-array",
+ "rand_core 0.9.3",
 ]
 
 [[package]]
@@ -446,7 +464,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2fb860ca6fafa5552fb6d0e816a69c8e49f0908bf524e30a90d97c85892d506"
 dependencies = [
  "block-buffer",
- "crypto-common",
+ "crypto-common 0.1.5",
  "subtle",
 ]
 
@@ -536,6 +554,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
  "digest",
+]
+
+[[package]]
+name = "hybrid-array"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dab50e193aebe510fe0e40230145820e02f48dae0cf339ea4204e6e708ff7bd"
+dependencies = [
+ "typenum",
 ]
 
 [[package]]
@@ -863,7 +890,7 @@ checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
  "rand_chacha",
- "rand_core",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -873,7 +900,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -884,6 +911,12 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 
 [[package]]
 name = "rayon"
@@ -1227,9 +1260,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.15.0"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
+checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 
 [[package]]
 name = "unicode-ident"
@@ -1506,7 +1539,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
 dependencies = [
  "curve25519-dalek",
- "rand_core",
+ "rand_core 0.6.4",
  "serde",
  "zeroize",
 ]
