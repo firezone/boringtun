@@ -53,7 +53,9 @@ use self::TimerName::*;
 #[derive(Debug)]
 pub struct Timers {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
-    is_initiator: bool,
+    ///
+    /// `None` if we don't have a prior handshake.
+    is_initiator: Option<bool>,
     timers: [Instant; TimerName::Top as usize],
     /// Did we receive data without sending anything back?
     ///
@@ -80,7 +82,7 @@ impl Timers {
         now: Instant,
     ) -> Timers {
         Timers {
-            is_initiator: false,
+            is_initiator: None,
             timers: [now; TimerName::Top as usize],
             want_passive_keepalive_at: Default::default(),
             want_handshake_at: Default::default(),
@@ -92,11 +94,11 @@ impl Timers {
     }
 
     fn is_initiator(&self) -> bool {
-        self.is_initiator
+        self.is_initiator.is_some_and(|v| v)
     }
 
     pub(crate) fn is_responder(&self) -> bool {
-        !self.is_initiator()
+        self.is_initiator.is_some_and(|v| !v)
     }
 
     // We don't really clear the timers, but we set them to the current time to
@@ -157,7 +159,7 @@ impl Tunn {
 
     pub(super) fn timer_tick_session_established(&mut self, is_initiator: bool, now: Instant) {
         self.timer_tick(TimeSessionEstablished, now);
-        self.timers.is_initiator = is_initiator;
+        self.timers.is_initiator = Some(is_initiator);
     }
 
     // We don't really clear the timers, but we set them to the current time to
