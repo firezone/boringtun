@@ -3,6 +3,7 @@
 
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult, N_SESSIONS};
+use std::iter;
 use std::ops::{Index, IndexMut};
 
 use rand::Rng;
@@ -376,7 +377,10 @@ impl Tunn {
     ///
     /// If this returns `None`, you may call it at your usual desired precision (usually once a second is enough).
     pub fn next_timer_update(&self) -> Option<Instant> {
-        self.timers.send_handshake_at
+        iter::empty()
+            .chain(self.timers.send_handshake_at)
+            .chain(self.timers.want_passive_keepalive_at)
+            .min()
     }
 
     #[deprecated(note = "Prefer `Tunn::time_since_last_handshake_at` to avoid time-impurity")]
