@@ -538,8 +538,13 @@ impl Tunn {
         self.format_handshake_initiation_at(dst, force_resend, Instant::now())
     }
 
-    /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
-    /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
+    /// Formats a new handshake initiation message and store it in dst.
+    ///
+    /// If `force_resend` is true will send a new handshake,
+    /// even if a handshake is already in progress (for example when a handshake times out).
+    ///
+    /// Unless `force_resend` is `true`, this function will **not** send a new handshake
+    /// if we are the responder.
     pub fn format_handshake_initiation_at<'a>(
         &mut self,
         dst: &'a mut [u8],
@@ -547,6 +552,11 @@ impl Tunn {
         now: Instant,
     ) -> TunnResult<'a> {
         if self.handshake.is_in_progress() && !force_resend {
+            return TunnResult::Done;
+        }
+
+        if self.timers.is_responder() && !force_resend {
+            tracing::debug!("No current session and we are the responder");
             return TunnResult::Done;
         }
 
