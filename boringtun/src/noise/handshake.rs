@@ -954,7 +954,7 @@ mod tests {
 
         aead_chacha20_seal(&mut encrypted_nothing, &key, counter, &[], &aad);
 
-        eprintln!("encrypted_nothing: {:?}", encrypted_nothing);
+        eprintln!("encrypted_nothing: {encrypted_nothing:?}");
 
         aead_chacha20_open(&mut [], &key, counter, &encrypted_nothing, &aad)
             .expect("Should open what we just sealed");

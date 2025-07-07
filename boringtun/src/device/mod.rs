@@ -738,7 +738,7 @@ impl Device {
                         Instant::now(),
                     ) {
                         TunnResult::Done => {}
-                        TunnResult::Err(e) => eprintln!("Decapsulate error {:?}", e),
+                        TunnResult::Err(e) => eprintln!("Decapsulate error {e:?}"),
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
                             let _: Result<_, _> = udp.send(packet);
@@ -800,11 +800,11 @@ impl Device {
                             if ek == io::ErrorKind::Interrupted || ek == io::ErrorKind::WouldBlock {
                                 break;
                             }
-                            eprintln!("Fatal read error on tun interface: {:?}", e);
+                            eprintln!("Fatal read error on tun interface: {e:?}");
                             return Action::Exit;
                         }
                         Err(e) => {
-                            eprintln!("Unexpected error on tun interface: {:?}", e);
+                            eprintln!("Unexpected error on tun interface: {e:?}");
                             return Action::Exit;
                         }
                     };
