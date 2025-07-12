@@ -424,7 +424,7 @@ impl Tunn {
         self.timer_tick(TimerName::TimeLastPacketSent, now);
         self.timer_tick_session_established(false, now); // New session established, we are not the initiator
 
-        tracing::debug!(message = "Sending handshake_response", local_idx = index);
+        tracing::debug!(local_idx = %index, "Sending handshake_response");
 
         Ok(TunnResult::WriteToNetwork(packet))
     }
@@ -453,7 +453,7 @@ impl Tunn {
         self.timer_tick_session_established(true, now); // New session established, we are the initiator
         self.set_current_session(l_idx);
 
-        tracing::debug!("Sending keepalive");
+        tracing::debug!(local_idx = %l_idx, "Sending keepalive");
 
         Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
     }
@@ -497,7 +497,7 @@ impl Tunn {
         }
 
         self.current = new_idx;
-        tracing::debug!(message = "New session", session = new_idx);
+        tracing::debug!(message = "New session", idx = new_idx);
     }
 
     /// Decrypts a data packet, and stores the decapsulated packet in dst.
@@ -557,8 +557,8 @@ impl Tunn {
         let starting_new_handshake = !self.handshake.is_in_progress();
 
         match self.handshake.format_handshake_initiation(dst, now) {
-            Ok(packet) => {
-                tracing::debug!("Sending handshake_initiation");
+            Ok((packet, local_idx)) => {
+                tracing::debug!(%local_idx, "Sending handshake_initiation");
 
                 if starting_new_handshake {
                     self.timer_tick(TimerName::TimeLastHandshakeStarted, now);

@@ -262,14 +262,14 @@ impl Tunn {
             return TunnResult::Err(WireGuardError::ConnectionExpired);
         }
 
-        if let Some(time_init_sent) = self.handshake.timer() {
+        if let Some((time_init_sent, local_idx)) = self.handshake.timer() {
             // Handshake Initiation Retransmission
             if now - handshake_started >= REKEY_ATTEMPT_TIME {
                 // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
                 // the retries give up and cease, and clear all existing packets queued
                 // up to be sent. If a packet is explicitly queued up to be sent, then
                 // this timer is reset.
-                tracing::debug!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
+                tracing::debug!(%local_idx, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                 self.handshake.set_expired();
                 self.clear_all();
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
@@ -281,7 +281,7 @@ impl Tunn {
                 // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                 // if a response has not been received, where jitter is some random
                 // value between 0 and 333 ms (`MAX_JITTER`).
-                tracing::debug!("HANDSHAKE(REKEY_TIMEOUT)");
+                tracing::debug!(%local_idx, "HANDSHAKE(REKEY_TIMEOUT)");
                 handshake_initiation_required = true;
             }
         } else {

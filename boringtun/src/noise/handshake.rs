@@ -442,9 +442,13 @@ impl Handshake {
         !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
     }
 
-    pub(crate) fn timer(&self) -> Option<Instant> {
+    pub(crate) fn timer(&self) -> Option<(Instant, u32)> {
         match self.state {
-            HandshakeState::InitSent(HandshakeInitSentState { time_sent, .. }) => Some(time_sent),
+            HandshakeState::InitSent(HandshakeInitSentState {
+                time_sent,
+                local_index,
+                ..
+            }) => Some((time_sent, local_index)),
             _ => None,
         }
     }
@@ -722,7 +726,7 @@ impl Handshake {
         &mut self,
         dst: &'a mut [u8],
         now: Instant,
-    ) -> Result<&'a mut [u8], WireGuardError> {
+    ) -> Result<(&'a mut [u8], u32), WireGuardError> {
         let buf_len = dst.len();
         if buf_len < super::HANDSHAKE_INIT_SZ {
             tracing::warn!(%buf_len, msg_len = %super::HANDSHAKE_INIT_SZ, "Destination buffer too small for handshake init message");
@@ -798,7 +802,10 @@ impl Handshake {
             }),
         );
 
-        self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_INIT_SZ])
+        let packet =
+            self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_INIT_SZ])?;
+
+        Ok((packet, local_index))
     }
 
     fn format_handshake_response<'a>(
