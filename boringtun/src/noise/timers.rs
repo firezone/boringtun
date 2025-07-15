@@ -433,7 +433,7 @@ impl Tunn {
 
     /// Returns an [`Instant`] when [`Tunn::update_timers_at`] should be called again.
     ///
-    /// If this returns `None`, you may call it at your usual desired precision (usually once a second is enough).
+    /// Calling it earlier than the given [`Instant`] is safe but unlikely to have any effect.
     pub fn next_timer_update(&self) -> Option<Instant> {
         // Mimic the `update_timers_at` function: If we have a handshake scheduled, other timers don't matter.
         if let Some(scheduled_handshake) = self.timers.send_handshake_at {
