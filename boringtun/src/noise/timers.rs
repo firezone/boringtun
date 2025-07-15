@@ -434,22 +434,29 @@ impl Tunn {
     /// Returns an [`Instant`] when [`Tunn::update_timers_at`] should be called again.
     ///
     /// Calling it earlier than the given [`Instant`] is safe but unlikely to have any effect.
-    pub fn next_timer_update(&self) -> Option<Instant> {
+    pub fn next_timer_update(&self) -> Option<(Instant, &'static str)> {
         // Mimic the `update_timers_at` function: If we have a handshake scheduled, other timers don't matter.
         if let Some(scheduled_handshake) = self.timers.send_handshake_at {
-            return Some(scheduled_handshake);
+            return Some((scheduled_handshake, "scheduled handshake"));
         }
 
         let common_timers = iter::empty()
-            .chain(self.next_expired_session())
-            .chain(self.handshake.cookie_expiration())
-            .chain(Some(self.timers.reject_after_time()));
+            .chain(
+                self.next_expired_session()
+                    .map(|instant| (instant, "next expired session")),
+            )
+            .chain(
+                self.handshake
+                    .cookie_expiration()
+                    .map(|instant| (instant, "cookie expiration")),
+            )
+            .chain(Some((self.timers.reject_after_time(), "reject-after-time")));
 
         if let Some((rekey_timeout, _)) = self.handshake.rekey_timeout() {
             common_timers
-                .chain(Some(rekey_timeout))
-                .chain(Some(self.timers.rekey_attempt_time()))
-                .min()
+                .chain(Some((rekey_timeout, "rekey-timeout")))
+                .chain(Some((self.timers.rekey_attempt_time(), "rekey-attempt")))
+                .min_by_key(|(i, _)| *i)
         } else {
             // Persistent keep-alive only makes sense if the current session is active.
             let persistent_keepalive = self.sessions[self.current % N_SESSIONS]
@@ -457,12 +464,28 @@ impl Tunn {
                 .and_then(|_| self.timers.next_persistent_keepalive());
 
             common_timers
-                .chain(self.timers.rekey_after_time_on_send())
-                .chain(self.timers.reject_after_time_on_receive())
-                .chain(self.timers.rekey_after_time_without_response())
-                .chain(self.timers.keepalive_after_time_without_send())
-                .chain(persistent_keepalive)
-                .min()
+                .chain(
+                    self.timers
+                        .rekey_after_time_on_send()
+                        .map(|instant| (instant, "rekey_after_time_on_send")),
+                )
+                .chain(
+                    self.timers
+                        .reject_after_time_on_receive()
+                        .map(|instant| (instant, "reject_after_time_on_receive")),
+                )
+                .chain(
+                    self.timers
+                        .rekey_after_time_without_response()
+                        .map(|instant| (instant, "rekey_after_time_without_response")),
+                )
+                .chain(
+                    self.timers
+                        .keepalive_after_time_without_send()
+                        .map(|instant| (instant, "keepalive_after_time_without_send")),
+                )
+                .chain(persistent_keepalive.map(|instant| (instant, "persistent keep-alive")))
+                .min_by_key(|(i, _)| *i)
         }
     }
 
