@@ -1,7 +1,7 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::timers::COOKIE_EXPIRATION_TIME;
+use super::timers::{COOKIE_EXPIRATION_TIME, REKEY_TIMEOUT};
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
@@ -442,15 +442,17 @@ impl Handshake {
         !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
     }
 
-    pub(crate) fn timer(&self) -> Option<(Instant, u32)> {
-        match self.state {
-            HandshakeState::InitSent(HandshakeInitSentState {
-                time_sent,
-                local_index,
-                ..
-            }) => Some((time_sent, local_index)),
-            _ => None,
-        }
+    pub(crate) fn rekey_timeout(&self) -> Option<(Instant, u32)> {
+        let HandshakeState::InitSent(HandshakeInitSentState {
+            time_sent,
+            local_index,
+            ..
+        }) = self.state
+        else {
+            return None;
+        };
+
+        Some((time_sent + REKEY_TIMEOUT, local_index))
     }
 
     pub(crate) fn set_expired(&mut self) {
