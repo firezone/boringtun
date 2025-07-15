@@ -46,6 +46,8 @@ pub enum TimerName {
     TimeLastDataPacketSent,
     /// Time we last sent persistent keepalive
     TimePersistentKeepalive,
+    /// Time we last updated our timers
+    TimeLastUpdate,
     Top,
 }
 
@@ -258,6 +260,8 @@ impl Tunn {
     }
 
     pub fn update_timers_at<'a>(&mut self, dst: &'a mut [u8], now: Instant) -> TunnResult<'a> {
+        self.timers[TimeLastUpdate] = now;
+
         if let Some(scheduled_handshake_at) = self.timers.send_handshake_at {
             // If we have scheduled a handshake and the deadline expired, send it immediately.
             if now >= scheduled_handshake_at {
@@ -435,6 +439,13 @@ impl Tunn {
     ///
     /// Calling it earlier than the given [`Instant`] is safe but unlikely to have any effect.
     pub fn next_timer_update(&self) -> Option<(Instant, &'static str)> {
+        let (next, reason) = self.next_timer_update_internal()?;
+        let last_update = self.timers[TimeLastUpdate];
+
+        Some((next.max(last_update), reason))
+    }
+
+    fn next_timer_update_internal(&self) -> Option<(Instant, &'static str)> {
         // Mimic the `update_timers_at` function: If we have a handshake scheduled, other timers don't matter.
         if let Some(scheduled_handshake) = self.timers.send_handshake_at {
             return Some((scheduled_handshake, "scheduled handshake"));
