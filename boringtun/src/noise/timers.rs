@@ -71,6 +71,8 @@ pub struct Timers {
     send_handshake_at: Option<Instant>,
 
     jitter_rng: StdRng,
+
+    rekey_attempt_time: Duration,
 }
 
 impl Timers {
@@ -89,6 +91,7 @@ impl Timers {
             should_reset_rr: reset_rr,
             send_handshake_at: None,
             jitter_rng: StdRng::seed_from_u64(rng_seed),
+            rekey_attempt_time: REKEY_ATTEMPT_TIME,
         }
     }
 
@@ -108,6 +111,10 @@ impl Timers {
         }
         self.want_handshake_at = None;
         self.want_passive_keepalive_at = None;
+    }
+
+    pub(crate) fn set_rekey_attempt_time(&mut self, rekey_attempt_time: Duration) {
+        self.rekey_attempt_time = rekey_attempt_time;
     }
 }
 
@@ -264,7 +271,7 @@ impl Tunn {
 
         if let Some((time_init_sent, local_idx)) = self.handshake.timer() {
             // Handshake Initiation Retransmission
-            if now - handshake_started >= REKEY_ATTEMPT_TIME {
+            if now - handshake_started >= self.timers.rekey_attempt_time {
                 // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
                 // the retries give up and cease, and clear all existing packets queued
                 // up to be sent. If a packet is explicitly queued up to be sent, then

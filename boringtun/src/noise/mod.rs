@@ -287,6 +287,13 @@ impl Tunn {
         }
     }
 
+    /// Set the `REKEY_ATTEMPT_TIME`.
+    ///
+    /// Defaults to 90s.
+    pub fn set_rekey_attempt_time(&mut self, rekey_attempt_time: Duration) {
+        self.timers.set_rekey_attempt_time(rekey_attempt_time);
+    }
+
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
     ///
