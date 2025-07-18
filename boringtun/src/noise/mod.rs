@@ -253,6 +253,10 @@ impl Tunn {
         }
     }
 
+    pub fn remote_static_public(&self) -> x25519::PublicKey {
+        self.handshake.remote_static_public()
+    }
+
     /// Update the private key and clear existing sessions
     #[deprecated(note = "Prefer `Tunn::set_static_private_at` to avoid time-impurity")]
     pub fn set_static_private(

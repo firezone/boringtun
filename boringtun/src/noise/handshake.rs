@@ -438,6 +438,10 @@ impl Handshake {
         }
     }
 
+    pub(crate) fn remote_static_public(&self) -> x25519::PublicKey {
+        self.params.peer_static_public
+    }
+
     pub(crate) fn is_in_progress(&self) -> bool {
         !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
     }
