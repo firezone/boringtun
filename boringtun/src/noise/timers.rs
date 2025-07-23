@@ -183,15 +183,18 @@ impl Tunn {
     }
 
     fn expire_sessions(&mut self, now: Instant) {
-        for maybe_session in self.sessions.iter_mut() {
+        for (idx, maybe_session) in self.sessions.iter_mut().enumerate() {
             let Some(session) = maybe_session else {
                 continue;
             };
 
+            let is_current = (self.current % N_SESSIONS) == idx;
+
             if session.expired_at(now) {
                 tracing::debug!(
-                    message = "SESSION_EXPIRED(REJECT_AFTER_TIME)",
-                    session = session.receiving_index
+                    session = session.receiving_index,
+                    %is_current,
+                    "SESSION_EXPIRED(REJECT_AFTER_TIME)"
                 );
                 *maybe_session = None;
             }
