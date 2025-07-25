@@ -257,6 +257,10 @@ impl Tunn {
         self.handshake.remote_static_public()
     }
 
+    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.handshake.preshared_key()
+    }
+
     /// Update the private key and clear existing sessions
     #[deprecated(note = "Prefer `Tunn::set_static_private_at` to avoid time-impurity")]
     pub fn set_static_private(

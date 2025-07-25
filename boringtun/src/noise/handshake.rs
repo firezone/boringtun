@@ -442,6 +442,10 @@ impl Handshake {
         self.params.peer_static_public
     }
 
+    pub(crate) fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.params.preshared_key
+    }
+
     pub(crate) fn is_in_progress(&self) -> bool {
         !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
     }
