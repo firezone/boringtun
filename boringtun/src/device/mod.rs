@@ -266,7 +266,7 @@ impl DeviceHandle {
                         }
                         handler.cancel();
                     }
-                    WaitResult::Error(e) => tracing::error!(message = "Poll error", error = ?e),
+                    WaitResult::Error(e) => tracing::error!(error = ?e, "Poll error"),
                 }
             }
         }
@@ -562,7 +562,7 @@ impl Device {
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
                             p.shutdown_endpoint(); // close open udp socket
                         }
-                        TunnResult::Err(e) => tracing::error!(message = "Timer error", error = ?e),
+                        TunnResult::Err(error) => tracing::error!(?error, "Timer error"),
                         TunnResult::WriteToNetwork(packet) => {
                             match endpoint_addr {
                                 SocketAddr::V4(_) => {
@@ -824,8 +824,8 @@ impl Device {
                         .encapsulate_at(src, &mut t.dst_buf[..], Instant::now())
                     {
                         TunnResult::Done => {}
-                        TunnResult::Err(e) => {
-                            tracing::error!(message = "Encapsulate error", error = ?e)
+                        TunnResult::Err(error) => {
+                            tracing::error!(?error, "Encapsulate error")
                         }
                         TunnResult::WriteToNetwork(packet) => {
                             let mut endpoint = peer.endpoint_mut();

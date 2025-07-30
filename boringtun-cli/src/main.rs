@@ -155,17 +155,17 @@ fn main() {
 
     let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {
         Ok(d) => d,
-        Err(e) => {
+        Err(error) => {
             // Notify parent that tunnel initialization failed
-            tracing::error!(message = "Failed to initialize tunnel", error=?e);
+            tracing::error!(?error, "Failed to initialize tunnel");
             sock1.send(&[0]).unwrap();
             exit(1);
         }
     };
 
     if !matches.is_present("disable-drop-privileges") {
-        if let Err(e) = drop_privileges() {
-            tracing::error!(message = "Failed to drop privileges", error = ?e);
+        if let Err(error) = drop_privileges() {
+            tracing::error!(?error, "Failed to drop privileges");
             sock1.send(&[0]).unwrap();
             exit(1);
         }

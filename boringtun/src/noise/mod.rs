@@ -418,24 +418,23 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        tracing::debug!(
-            message = "Received handshake_initiation",
-            remote_idx = p.sender_idx
-        );
+        let remote_idx = p.sender_idx;
+
+        tracing::debug!(%remote_idx, "Received handshake_initiation",);
 
         let (packet, session) = self
             .handshake
             .receive_handshake_initialization(p, dst, now)?;
 
         // Store new session in ring buffer
-        let index = session.local_index();
-        self.sessions[index % N_SESSIONS] = Some(session);
+        let local_idx = session.local_index();
+        self.sessions[local_idx % N_SESSIONS] = Some(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
         self.timer_tick(TimerName::TimeLastPacketSent, now);
         self.timer_tick_session_established(false, now); // New session established, we are not the initiator
 
-        tracing::debug!(local_idx = %index, "Sending handshake_response");
+        tracing::debug!(%local_idx, %remote_idx, "Sending handshake_response");
 
         Ok(TunnResult::WriteToNetwork(packet))
     }
@@ -447,24 +446,24 @@ impl Tunn {
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
         tracing::debug!(
-            message = "Received handshake_response",
-            local_idx = p.receiver_idx,
-            remote_idx = p.sender_idx
+            local_idx = %p.receiver_idx,
+            remote_idx = %p.sender_idx,
+            "Received handshake_response"
         );
 
         let session = self.handshake.receive_handshake_response(p, now)?;
 
         let keepalive_packet = session.format_packet_data(&[], dst)?;
         // Store new session in ring buffer
-        let l_idx = session.local_index();
-        let index = l_idx % N_SESSIONS;
+        let local_idx = session.local_index();
+        let index = local_idx % N_SESSIONS;
         self.sessions[index] = Some(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
         self.timer_tick_session_established(true, now); // New session established, we are the initiator
-        self.set_current_session(l_idx);
+        self.set_current_session(local_idx);
 
-        tracing::debug!(local_idx = %l_idx, "Sending keepalive");
+        tracing::debug!(%local_idx, "Sending keepalive");
 
         Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
     }
@@ -474,15 +473,14 @@ impl Tunn {
         p: PacketCookieReply,
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        tracing::debug!(
-            message = "Received cookie_reply",
-            local_idx = p.receiver_idx
-        );
+        let local_idx = p.receiver_idx;
+
+        tracing::debug!(%local_idx, "Received cookie_reply");
 
         self.handshake.receive_cookie_reply(p, now)?;
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
 
-        tracing::debug!("Did set cookie");
+        tracing::debug!(%local_idx, "Did set cookie");
 
         Ok(TunnResult::Done)
     }
@@ -508,7 +506,7 @@ impl Tunn {
         }
 
         self.current = new_idx;
-        tracing::debug!(message = "New session", idx = new_idx);
+        tracing::debug!(idx = %new_idx, "New session");
     }
 
     /// Decrypts a data packet, and stores the decapsulated packet in dst.
@@ -518,20 +516,20 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let r_idx = packet.receiver_idx as usize;
-        let idx = r_idx % N_SESSIONS;
+        let remote_idx = packet.receiver_idx as usize;
+        let idx = remote_idx % N_SESSIONS;
 
         // Get the (probably) right session
         let decapsulated_packet = {
             let session = self.sessions[idx].as_ref();
             let session = session.ok_or_else(|| {
-                tracing::trace!(message = "No current session available", remote_idx = r_idx);
+                tracing::trace!(%remote_idx, "No current session available");
                 WireGuardError::NoCurrentSession
             })?;
             session.receive_packet_data(packet, dst)?
         };
 
-        self.set_current_session(r_idx);
+        self.set_current_session(remote_idx);
 
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
 
