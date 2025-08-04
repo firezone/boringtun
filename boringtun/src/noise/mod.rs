@@ -1233,6 +1233,60 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn emits_event_with_local_index_after_handshake() {
+        let mut now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(Instant::now());
+        let mut my_dst = [0u8; 1024];
+
+        let Event::NewLocalSessionIndex {
+            local_idx: my_local_index,
+        } = my_tun.poll_event().unwrap();
+        let Event::NewLocalSessionIndex {
+            local_idx: their_local_index,
+        } = their_tun.poll_event().unwrap();
+
+        assert_eq!(my_tun.current, my_local_index as usize);
+        assert_eq!(their_tun.current, their_local_index as usize);
+
+        // Advance time 1 second and "send" 1 packet so that we send a handshake
+        // after the timeout
+
+        now += Duration::from_secs(1);
+
+        assert!(matches!(
+            their_tun.update_timers_at(&mut [], now),
+            TunnResult::Done
+        ));
+        assert!(matches!(
+            my_tun.update_timers_at(&mut my_dst, now),
+            TunnResult::Done
+        ));
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let data = my_tun.encapsulate_at(&sent_packet_buf, &mut my_dst, now);
+        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+
+        //Advance to timeout
+        now += REKEY_AFTER_TIME;
+
+        assert!(matches!(
+            their_tun.update_timers_at(&mut [], now),
+            TunnResult::Done
+        ));
+        update_timer_results_in_handshake(&mut my_tun, &mut now);
+
+        let Event::NewLocalSessionIndex {
+            local_idx: my_local_index,
+        } = my_tun.poll_event().unwrap();
+
+        assert_eq!(
+            my_tun.current + 1,
+            my_local_index as usize,
+            "Next local index should be current + 1"
+        );
+    }
+
     impl<'a> TunnResult<'a> {
         fn unwrap_network(self) -> &'a [u8] {
             match self {
