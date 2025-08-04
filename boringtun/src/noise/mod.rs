@@ -71,6 +71,16 @@ pub struct Tunn {
     tx_bytes: usize,
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
+
+    events: VecDeque<Event>,
+}
+
+#[derive(Debug)]
+pub enum Event {
+    /// A new local session index has been allocated.
+    ///
+    /// Packets for this index should be routed to this instance of [`Tun`].
+    NewLocalSessionIndex { local_idx: u32 },
 }
 
 type MessageType = u32;
@@ -166,6 +176,10 @@ impl Tunn {
         self.handshake.is_expired()
     }
 
+    pub fn poll_event(&mut self) -> Option<Event> {
+        self.events.pop_front()
+    }
+
     pub fn dst_address(packet: &[u8]) -> Option<IpAddr> {
         if packet.is_empty() {
             return None;
@@ -250,6 +264,8 @@ impl Tunn {
                     now,
                 ))
             }),
+
+            events: Default::default(),
         }
     }
 
@@ -430,6 +446,10 @@ impl Tunn {
             .handshake
             .receive_handshake_initialization(p, dst, now)?;
 
+        self.events.push_back(Event::NewLocalSessionIndex {
+            local_idx: session.receiving_index,
+        });
+
         // Store new session in ring buffer
         let local_idx = session.local_index();
         self.sessions[local_idx % N_SESSIONS] = Some(session);
@@ -572,6 +592,9 @@ impl Tunn {
         match self.handshake.format_handshake_initiation(dst, now) {
             Ok((packet, local_idx)) => {
                 tracing::debug!(%local_idx, "Sending handshake_initiation");
+
+                self.events
+                    .push_back(Event::NewLocalSessionIndex { local_idx });
 
                 if starting_new_handshake {
                     self.timer_tick(TimerName::TimeLastHandshakeStarted, now);
