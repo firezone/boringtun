@@ -38,7 +38,7 @@ impl Index {
         Self(result)
     }
 
-    pub(crate) fn to_le_bytes(&self) -> [u8; 4] {
+    pub(crate) fn to_le_bytes(self) -> [u8; 4] {
         self.0.to_le_bytes()
     }
 
