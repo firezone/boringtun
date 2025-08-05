@@ -183,12 +183,12 @@ impl Tunn {
     }
 
     fn expire_sessions(&mut self, now: Instant) {
-        for (idx, maybe_session) in self.sessions.iter_mut().enumerate() {
+        for maybe_session in self.sessions.iter_mut() {
             let Some(session) = maybe_session else {
                 continue;
             };
 
-            let is_current = self.current.session() == idx;
+            let is_current = self.current == session.local_index();
 
             if session.expired_at(now) {
                 tracing::debug!(
