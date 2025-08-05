@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::errors::WireGuardError;
-use crate::noise::{Tunn, TunnResult, N_SESSIONS};
+use crate::noise::{Tunn, TunnResult};
 use std::iter;
 use std::ops::{Index, IndexMut};
 
@@ -188,11 +188,11 @@ impl Tunn {
                 continue;
             };
 
-            let is_current = (self.current % N_SESSIONS) == idx;
+            let is_current = self.current.session() == idx;
 
             if session.expired_at(now) {
                 tracing::debug!(
-                    session = session.receiving_index,
+                    session = %session.receiving_index,
                     %is_current,
                     "SESSION_EXPIRED(REJECT_AFTER_TIME)"
                 );
@@ -239,7 +239,7 @@ impl Tunn {
         self.expire_sessions(now);
 
         // In case our session expired, create a new one iff we initiated the previous one.
-        if self.sessions[self.current % N_SESSIONS].is_none()
+        if self.sessions[self.current].is_none()
             && !self.handshake.is_in_progress()
             && self.timers.is_initiator()
         {
@@ -410,8 +410,7 @@ impl Tunn {
     }
 
     pub fn time_since_last_handshake_at(&self, now: Instant) -> Option<Duration> {
-        let current_session = self.current;
-        if self.sessions[current_session % super::N_SESSIONS].is_some() {
+        if self.sessions[self.current].is_some() {
             let session_established_at = self.timers[TimeSessionEstablished];
 
             Some(now.duration_since(session_established_at))

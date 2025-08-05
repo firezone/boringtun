@@ -5,8 +5,11 @@ pub mod errors;
 pub mod handshake;
 pub mod rate_limiter;
 
+mod index;
 mod session;
 mod timers;
+
+pub use index::Index;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
@@ -63,7 +66,7 @@ pub struct Tunn {
     /// The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
     sessions: [Option<session::Session>; N_SESSIONS],
     /// Index of most recently used session
-    current: usize,
+    current: Index,
     /// Queue to store blocked packets
     packet_queue: VecDeque<Vec<u8>>,
     /// Keeps tabs on the expiring timers
@@ -205,7 +208,7 @@ impl Tunn {
             peer_static_public,
             preshared_key,
             persistent_keepalive,
-            index,
+            Index::new_local(index),
             rate_limiter,
             rand::random(),
             Instant::now(),
@@ -219,7 +222,7 @@ impl Tunn {
         peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
-        index: u32,
+        index: Index,
         rate_limiter: Option<Arc<RateLimiter>>,
         rng_seed: u64,
         now: Instant,
@@ -231,7 +234,7 @@ impl Tunn {
                 static_private,
                 static_public,
                 peer_static_public,
-                index << 8,
+                index,
                 preshared_key,
                 now,
             ),
@@ -325,8 +328,7 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> TunnResult<'a> {
-        let current = self.current;
-        if let Some(session) = self.sessions[current % N_SESSIONS]
+        if let Some(session) = self.sessions[self.current]
             .as_ref()
             .filter(|s| s.should_use_at(now) || self.timers.is_responder())
         {
@@ -422,7 +424,7 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let remote_idx = p.sender_idx;
+        let remote_idx = Index::from_peer(p.sender_idx);
 
         tracing::debug!(%remote_idx, "Received handshake_initiation",);
 
@@ -432,7 +434,7 @@ impl Tunn {
 
         // Store new session in ring buffer
         let local_idx = session.local_index();
-        self.sessions[local_idx % N_SESSIONS] = Some(session);
+        self.sessions[local_idx] = Some(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
         self.timer_tick(TimerName::TimeLastPacketSent, now);
@@ -450,8 +452,8 @@ impl Tunn {
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
         tracing::debug!(
-            local_idx = %p.receiver_idx,
-            remote_idx = %p.sender_idx,
+            local_idx = %Index::from_peer(p.receiver_idx),
+            remote_idx = %Index::from_peer(p.sender_idx),
             "Received handshake_response"
         );
 
@@ -460,8 +462,7 @@ impl Tunn {
         let keepalive_packet = session.format_packet_data(&[], dst)?;
         // Store new session in ring buffer
         let local_idx = session.local_index();
-        let index = local_idx % N_SESSIONS;
-        self.sessions[index] = Some(session);
+        self.sessions[local_idx] = Some(session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived, now);
         self.timer_tick_session_established(true, now); // New session established, we are the initiator
@@ -477,7 +478,7 @@ impl Tunn {
         p: PacketCookieReply,
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let local_idx = p.receiver_idx;
+        let local_idx = Index::from_peer(p.receiver_idx);
 
         tracing::debug!(%local_idx, "Received cookie_reply");
 
@@ -490,18 +491,18 @@ impl Tunn {
     }
 
     /// Update the index of the currently used session, if needed
-    fn set_current_session(&mut self, new_idx: usize) {
+    fn set_current_session(&mut self, new_idx: Index) {
         let cur_idx = self.current;
         if cur_idx == new_idx {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
 
-        let Some(new) = self.sessions[new_idx % N_SESSIONS].as_ref() else {
+        let Some(new) = self.sessions[new_idx].as_ref() else {
             debug_assert!(false, "new session should always exist");
             return;
         };
-        if self.sessions[cur_idx % N_SESSIONS]
+        if self.sessions[cur_idx]
             .as_ref()
             .is_some_and(|current| current.established_at() > new.established_at())
         {
@@ -520,12 +521,11 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let remote_idx = packet.receiver_idx as usize;
-        let idx = remote_idx % N_SESSIONS;
+        let remote_idx = Index::from_peer(packet.receiver_idx);
 
         // Get the (probably) right session
         let decapsulated_packet = {
-            let session = self.sessions[idx].as_ref();
+            let session = self.sessions[remote_idx].as_ref();
             let session = session.ok_or_else(|| {
                 tracing::trace!(%remote_idx, "No current session available");
                 WireGuardError::NoCurrentSession
@@ -675,8 +675,8 @@ impl Tunn {
         let mut cur_avg = 0.0;
         let mut total_weight = 0.0;
 
-        for i in 0..N_SESSIONS {
-            if let Some(ref session) = self.sessions[(session_idx.wrapping_sub(i)) % N_SESSIONS] {
+        for _ in 0..N_SESSIONS {
+            if let Some(ref session) = self.sessions[session_idx.wrapping_sub()] {
                 let (expected, received) = session.current_packet_cnt();
 
                 let loss = if expected == 0 {
@@ -736,18 +736,18 @@ mod tests {
     fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
-        let my_idx = OsRng.next_u32();
+        let my_idx = OsRng.next_u32() >> 8;
 
         let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
-        let their_idx = OsRng.next_u32();
+        let their_idx = OsRng.next_u32() >> 8;
 
         let my_tun = Tunn::new_at(
             my_secret_key,
             their_public_key,
             None,
             None,
-            my_idx,
+            Index::new_local(my_idx),
             None,
             rand::random(),
             now,
@@ -758,7 +758,7 @@ mod tests {
             my_public_key,
             None,
             None,
-            their_idx,
+            Index::new_local(their_idx),
             None,
             rand::random(),
             now,

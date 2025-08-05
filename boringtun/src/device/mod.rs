@@ -39,7 +39,7 @@ use std::time::Instant;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::{Packet, Tunn, TunnResult};
+use crate::noise::{Index, Packet, Tunn, TunnResult};
 use crate::x25519;
 use allowed_ips::AllowedIps;
 use parking_lot::Mutex;
@@ -333,7 +333,7 @@ impl Device {
             pub_key,
             preshared_key,
             keepalive,
-            next_index,
+            Index::new_local(next_index),
             None,
             rand::random(),
             Instant::now(),

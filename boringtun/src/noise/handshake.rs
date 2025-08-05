@@ -1,6 +1,7 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use super::index::Index;
 use super::timers::COOKIE_EXPIRATION_TIME;
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
 use crate::noise::errors::WireGuardError;
@@ -255,7 +256,7 @@ impl std::fmt::Debug for NoiseParams {
 }
 
 struct HandshakeInitSentState {
-    local_index: u32,
+    local_index: Index,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
     ephemeral_private: x25519::ReusableSecret,
@@ -294,7 +295,7 @@ enum HandshakeState {
 pub struct Handshake {
     params: NoiseParams,
     /// Index of the next session
-    next_index: u32,
+    next_index: Index,
     /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed response to a handshake with bad networks
     previous: HandshakeState,
     /// Current handshake state
@@ -310,7 +311,7 @@ pub struct Handshake {
 #[derive(Default)]
 struct Cookies {
     last_mac1: Option<[u8; 16]>,
-    index: u32,
+    index: Index,
     write_cookie: Option<WriteCookie>,
 }
 
@@ -415,7 +416,7 @@ impl Handshake {
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
-        global_idx: u32,
+        global_idx: Index,
         preshared_key: Option<[u8; 32]>,
         now: Instant,
     ) -> Handshake {
@@ -450,7 +451,7 @@ impl Handshake {
         !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
     }
 
-    pub(crate) fn timer(&self) -> Option<(Instant, u32)> {
+    pub(crate) fn timer(&self) -> Option<(Instant, Index)> {
         match self.state {
             HandshakeState::InitSent(HandshakeInitSentState {
                 time_sent,
@@ -476,14 +477,6 @@ impl Handshake {
 
     pub(crate) fn clear_cookie(&mut self) {
         self.cookies.write_cookie = None;
-    }
-
-    // The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits for cyclic session index
-    fn inc_index(&mut self) -> u32 {
-        let index = self.next_index;
-        let idx8 = index as u8;
-        self.next_index = (index & !0xff) | u32::from(idx8.wrapping_add(1));
-        self.next_index
     }
 
     pub(crate) fn set_static_private(
@@ -660,7 +653,13 @@ impl Handshake {
         } else {
             self.state = HandshakeState::None;
         }
-        Ok(Session::new(local_index, peer_index, temp3, temp2, now))
+        Ok(Session::new(
+            local_index,
+            Index::from_peer(peer_index),
+            temp3,
+            temp2,
+            now,
+        ))
     }
 
     pub(super) fn receive_cookie_reply(
@@ -704,7 +703,7 @@ impl Handshake {
     // Compute and append mac1 and mac2 to a handshake message
     fn append_mac1_and_mac2<'a>(
         &mut self,
-        local_index: u32,
+        local_index: Index,
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
         let mac1_off = dst.len() - 32;
@@ -734,7 +733,7 @@ impl Handshake {
         &mut self,
         dst: &'a mut [u8],
         now: Instant,
-    ) -> Result<(&'a mut [u8], u32), WireGuardError> {
+    ) -> Result<(&'a mut [u8], Index), WireGuardError> {
         let buf_len = dst.len();
         if buf_len < super::HANDSHAKE_INIT_SZ {
             tracing::warn!(%buf_len, msg_len = %super::HANDSHAKE_INIT_SZ, "Destination buffer too small for handshake init message");
@@ -748,7 +747,7 @@ impl Handshake {
         let (encrypted_static, rest) = rest.split_at_mut(32 + 16);
         let (encrypted_timestamp, _) = rest.split_at_mut(12 + 16);
 
-        let local_index = self.inc_index();
+        let local_index = self.next_index.wrapping_increment();
 
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = INITIAL_CHAIN_KEY;
@@ -849,7 +848,7 @@ impl Handshake {
 
         // responder.ephemeral_private = DH_GENERATE()
         let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
-        let local_index = self.inc_index();
+        let local_index = self.next_index.wrapping_increment();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
         message_type.copy_from_slice(&super::HANDSHAKE_RESP.to_le_bytes());
@@ -912,7 +911,7 @@ impl Handshake {
 
         Ok((
             dst,
-            Session::new(local_index, peer_index, temp2, temp3, now),
+            Session::new(local_index, Index::from_peer(peer_index), temp2, temp3, now),
         ))
     }
 }

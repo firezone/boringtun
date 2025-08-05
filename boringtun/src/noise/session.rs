@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::{
+    index::Index,
     timers::{REJECT_AFTER_TIME, SHOULD_NOT_USE_AFTER_TIME},
     PacketData,
 };
@@ -15,8 +16,8 @@ use std::{
 
 pub struct Session {
     established_at: Instant,
-    pub(crate) receiving_index: u32,
-    sending_index: u32,
+    pub(crate) receiving_index: Index,
+    sending_index: Index,
     receiver: LessSafeKey,
     sender: LessSafeKey,
     sending_key_counter: AtomicUsize,
@@ -160,8 +161,8 @@ impl ReceivingKeyCounterValidator {
 
 impl Session {
     pub(super) fn new(
-        local_index: u32,
-        peer_index: u32,
+        local_index: Index,
+        peer_index: Index,
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
         now: Instant,
@@ -179,8 +180,8 @@ impl Session {
         }
     }
 
-    pub(super) fn local_index(&self) -> usize {
-        self.receiving_index as usize
+    pub(super) fn local_index(&self) -> Index {
+        self.receiving_index
     }
 
     pub(crate) fn established_at(&self) -> Instant {
