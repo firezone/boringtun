@@ -42,7 +42,9 @@ const IP_LEN_SZ: usize = 2;
 
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
-const N_SESSIONS: usize = 8;
+///
+/// We use a `u8` to align with the number of bits reserved in [`Index`] for the sessions.
+const N_SESSIONS: u8 = 8;
 
 #[derive(Debug)]
 pub enum TunnResult<'a> {
@@ -64,7 +66,7 @@ pub struct Tunn {
     /// The handshake currently in progress
     handshake: handshake::Handshake,
     /// The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
-    sessions: [Option<session::Session>; N_SESSIONS],
+    sessions: [Option<session::Session>; N_SESSIONS as usize],
     /// Index of most recently used session
     current: Index,
     /// Queue to store blocked packets
@@ -675,8 +677,8 @@ impl Tunn {
         let mut cur_avg = 0.0;
         let mut total_weight = 0.0;
 
-        for _ in 0..N_SESSIONS {
-            if let Some(ref session) = self.sessions[session_idx.wrapping_sub()] {
+        for i in 0..N_SESSIONS {
+            if let Some(ref session) = self.sessions[session_idx.wrapping_sub(i)] {
                 let (expected, received) = session.current_packet_cnt();
 
                 let loss = if expected == 0 {

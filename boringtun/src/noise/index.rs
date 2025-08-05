@@ -30,10 +30,10 @@ impl Index {
         Self(self.0)
     }
 
-    pub(crate) fn wrapping_sub(&self) -> Self {
+    pub(crate) fn wrapping_sub(&self, value: u8) -> Self {
         let index = self.0;
         let idx8 = index as u8;
-        let result = (index & !0xff) | u32::from(idx8.wrapping_sub(1));
+        let result = (index & !0xff) | u32::from(idx8.wrapping_sub(value));
 
         Self(result)
     }
@@ -74,17 +74,17 @@ impl PartialEq<Index> for u32 {
     }
 }
 
-impl std::ops::Index<Index> for [Option<Session>; N_SESSIONS] {
+impl std::ops::Index<Index> for [Option<Session>; N_SESSIONS as usize] {
     type Output = Option<Session>;
 
     fn index(&self, index: Index) -> &Self::Output {
-        &self[(index.0 as usize) % N_SESSIONS]
+        &self[(index.0 as usize) % N_SESSIONS as usize]
     }
 }
 
-impl std::ops::IndexMut<Index> for [Option<Session>; N_SESSIONS] {
+impl std::ops::IndexMut<Index> for [Option<Session>; N_SESSIONS as usize] {
     fn index_mut(&mut self, index: Index) -> &mut Self::Output {
-        &mut self[(index.0 as usize) % N_SESSIONS]
+        &mut self[(index.0 as usize) % N_SESSIONS as usize]
     }
 }
 
