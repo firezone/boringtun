@@ -2,10 +2,15 @@ use std::fmt;
 
 use super::{session::Session, N_SESSIONS};
 
+/// A unique identifier for an instance of [`Tunn`](super::Tunn).
+///
+/// The top 24 bits are used as a unique, global identifier.
+/// The lower 8 bits are used as a rotating session index with a given peer.
+///
+/// This allows for ~16M unique peers and 256 sessions per peer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Index(u32);
 
-// The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits for cyclic session index
 impl Index {
     pub fn new_local(idx: u32) -> Self {
         assert_eq!(idx >> 24, 0, "Must be at most a 24-bit number");
