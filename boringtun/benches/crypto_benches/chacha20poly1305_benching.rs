@@ -1,6 +1,6 @@
 use aead::{AeadInPlace, KeyInit};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, RngCore, TryRngCore};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 
 fn chacha20poly1305_ring(key_bytes: &[u8], buf: &mut [u8]) {
@@ -49,7 +49,7 @@ pub fn bench_chacha20poly1305(c: &mut Criterion) {
                 let mut key = [0; 32];
                 let mut buf = vec![0; i + 16];
 
-                let mut rng = OsRng;
+                let mut rng = OsRng.unwrap_err();
 
                 rng.fill_bytes(&mut key);
                 rng.fill_bytes(&mut buf);
@@ -65,7 +65,7 @@ pub fn bench_chacha20poly1305(c: &mut Criterion) {
                 let mut key = [0; 32];
                 let mut buf = vec![0; i + 16];
 
-                let mut rng = OsRng;
+                let mut rng = OsRng.unwrap_err();
 
                 rng.fill_bytes(&mut key);
                 rng.fill_bytes(&mut buf);

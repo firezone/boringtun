@@ -730,19 +730,19 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{rngs::OsRng, RngCore, TryRngCore};
     use timers::{KEEPALIVE_TIMEOUT, MAX_JITTER, REJECT_AFTER_TIME, SHOULD_NOT_USE_AFTER_TIME};
     use tracing::{level_filters::LevelFilter, Level};
     use tracing_subscriber::util::SubscriberInitExt;
 
     fn create_two_tuns(now: Instant) -> (Tunn, Tunn) {
-        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(&mut OsRng.unwrap_mut());
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
-        let my_idx = OsRng.next_u32() >> 8;
+        let my_idx = OsRng.unwrap_err().next_u32() >> 8;
 
-        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(&mut OsRng.unwrap_mut());
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
-        let their_idx = OsRng.next_u32() >> 8;
+        let their_idx = OsRng.unwrap_err().next_u32() >> 8;
 
         let my_tun = Tunn::new_at(
             my_secret_key,

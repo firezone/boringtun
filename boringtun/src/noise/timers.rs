@@ -367,7 +367,7 @@ impl Tunn {
             let jitter = self
                 .timers
                 .jitter_rng
-                .gen_range(Duration::ZERO..=MAX_JITTER);
+                .random_range(Duration::ZERO..=MAX_JITTER);
 
             let existing = self.timers.send_handshake_at.replace(now + jitter);
             debug_assert!(
