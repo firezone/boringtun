@@ -12,7 +12,6 @@ use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use constant_time_eq::constant_time_eq;
-use rand::rngs::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
 use std::time::{Duration, Instant, SystemTime};
@@ -755,7 +754,7 @@ impl Handshake {
         let mut hash = INITIAL_CHAIN_HASH;
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
+        let ephemeral_private = x25519::ReusableSecret::random();
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         message_type.copy_from_slice(&super::HANDSHAKE_INIT.to_le_bytes());
@@ -847,7 +846,7 @@ impl Handshake {
         let (encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
+        let ephemeral_private = x25519::ReusableSecret::random();
         let local_index = self.next_index.wrapping_increment();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }

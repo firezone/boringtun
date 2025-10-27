@@ -5,7 +5,7 @@
 ## How to use this fork
 
 This repository is a fork of https://github.com/cloudflare/boringtun.
-We aim for 100% API compatibility with upstream.
+We aim for a high API compatibility with upstream.
 As such, the best way to use this fork is by patching the `boringtun` dependency in your `Cargo.toml`:
 
 ```toml
@@ -14,6 +14,9 @@ boringtun = { git = "https://github.com/firezone/boringtun", branch = "master" }
 ```
 
 The full list of patches in this fork over upstream can be seen in [here](https://github.com/cloudflare/boringtun/compare/master...firezone:boringtun:master).
+
+Up until [37739b0a366ca73029ada59c043bf1d3e56f97f6](https://github.com/firezone/boringtun/commit/37739b0a366ca73029ada59c043bf1d3e56f97f6), all changes are fully backwards-compatible.
+Going forward, we bumped the version to 0.7 and made some breaking changes like bumping `x25519-dalek` and `rand` as well as removing some deprecated APIs.
 
 ## Warning
 Boringtun is currently undergoing a restructuring. You should probably not rely on or link to 

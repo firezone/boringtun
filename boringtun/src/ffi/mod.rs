@@ -13,6 +13,7 @@ use hex::encode as encode_hex;
 use libc::{raise, SIGSEGV};
 use parking_lot::Mutex;
 use rand::rngs::OsRng;
+use rand::TryRngCore;
 use tracing;
 use tracing_subscriber::fmt;
 
@@ -100,7 +101,7 @@ pub struct x25519_key {
 #[no_mangle]
 pub extern "C" fn x25519_secret_key() -> x25519_key {
     x25519_key {
-        key: StaticSecret::random_from_rng(OsRng).to_bytes(),
+        key: StaticSecret::random_from_rng(&mut OsRng.unwrap_mut()).to_bytes(),
     }
 }
 
