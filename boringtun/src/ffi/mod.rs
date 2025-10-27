@@ -261,7 +261,7 @@ pub unsafe extern "C" fn new_tunnel(
 
         if let Ok(string) = c_str.to_str() {
             if let Ok(key) = string.parse::<KeyBytes>() {
-                Some(key.0)
+                Some(StaticSecret::from(key.0))
             } else {
                 return null_mut();
             }

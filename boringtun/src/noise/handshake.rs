@@ -238,8 +238,10 @@ struct NoiseParams {
     static_shared: x25519::SharedSecret,
     /// A pre-computation of HASH("mac1----", peer_static_public) for this peer
     sending_mac1_key: [u8; KEY_LEN],
-    /// An optional preshared key
-    preshared_key: Option<[u8; KEY_LEN]>,
+    /// A preshared key.
+    ///
+    /// Initialized to all zeroes by default.
+    preshared_key: x25519::StaticSecret,
 }
 
 impl std::fmt::Debug for NoiseParams {
@@ -250,7 +252,7 @@ impl std::fmt::Debug for NoiseParams {
             .field("peer_static_public", &self.peer_static_public)
             .field("static_shared", &"<redacted>")
             .field("sending_mac1_key", &self.sending_mac1_key)
-            .field("preshared_key", &self.preshared_key)
+            .field("preshared_key", &"<redacted>")
             .finish()
     }
 }
@@ -378,7 +380,7 @@ impl NoiseParams {
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<x25519::StaticSecret>,
     ) -> NoiseParams {
         let static_shared = static_private.diffie_hellman(&peer_static_public);
 
@@ -390,7 +392,7 @@ impl NoiseParams {
             peer_static_public,
             static_shared,
             sending_mac1_key: initial_sending_mac_key,
-            preshared_key,
+            preshared_key: preshared_key.unwrap_or_else(|| x25519::StaticSecret::from([0u8; 32])),
         }
     }
 
@@ -417,7 +419,7 @@ impl Handshake {
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
         global_idx: Index,
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<x25519_dalek::StaticSecret>,
         now: Instant,
     ) -> Handshake {
         let params = NoiseParams::new(
@@ -443,8 +445,8 @@ impl Handshake {
         self.params.peer_static_public
     }
 
-    pub(crate) fn preshared_key(&self) -> Option<[u8; 32]> {
-        self.params.preshared_key
+    pub(crate) fn preshared_key(&self) -> &x25519::StaticSecret {
+        &self.params.preshared_key
     }
 
     pub(crate) fn is_in_progress(&self) -> bool {
@@ -615,10 +617,7 @@ impl Handshake {
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp = HMAC(responder.chaining_key, preshared_key)
-        let temp = b2s_hmac(
-            &chaining_key,
-            &self.params.preshared_key.unwrap_or([0u8; 32])[..],
-        );
+        let temp = b2s_hmac(&chaining_key, self.params.preshared_key.as_bytes());
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp2 = HMAC(temp, responder.chaining_key || 0x2)
@@ -880,10 +879,7 @@ impl Handshake {
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp = HMAC(responder.chaining_key, preshared_key)
-        let temp = b2s_hmac(
-            &chaining_key,
-            &self.params.preshared_key.unwrap_or([0u8; 32])[..],
-        );
+        let temp = b2s_hmac(&chaining_key, self.params.preshared_key.as_bytes());
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp2 = HMAC(temp, responder.chaining_key || 0x2)

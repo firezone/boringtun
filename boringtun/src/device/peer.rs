@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use crate::device::{AllowedIps, Error};
 use crate::noise::{Tunn, TunnResult};
+use crate::x25519;
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -24,7 +25,7 @@ pub struct Peer {
     index: u32,
     endpoint: RwLock<Endpoint>,
     allowed_ips: AllowedIps<()>,
-    preshared_key: Option<[u8; 32]>,
+    preshared_key: Option<x25519::StaticSecret>,
 }
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
@@ -57,7 +58,7 @@ impl Peer {
         index: u32,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<x25519::StaticSecret>,
     ) -> Peer {
         Peer {
             tunnel,
@@ -165,7 +166,7 @@ impl Peer {
         self.tunnel.persistent_keepalive()
     }
 
-    pub fn preshared_key(&self) -> Option<&[u8; 32]> {
+    pub fn preshared_key(&self) -> Option<&x25519::StaticSecret> {
         self.preshared_key.as_ref()
     }
 
