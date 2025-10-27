@@ -309,7 +309,7 @@ impl Device {
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<x25519::StaticSecret>,
     ) {
         if remove {
             // Completely remove a peer
@@ -331,7 +331,7 @@ impl Device {
         let tunn = Tunn::new_at(
             device_key_pair.0.clone(),
             pub_key,
-            preshared_key,
+            preshared_key.clone(),
             keepalive,
             Index::new_local(next_index),
             None,

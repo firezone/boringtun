@@ -319,7 +319,7 @@ fn api_set_peer(
                     Err(_) => return EINVAL,
                 },
                 "preshared_key" => match val.parse::<KeyBytes>() {
-                    Ok(key_bytes) => preshared_key = Some(key_bytes.0),
+                    Ok(key_bytes) => preshared_key = Some(x25519::StaticSecret::from(key_bytes.0)),
                     Err(_) => return EINVAL,
                 },
                 "endpoint" => match val.parse::<SocketAddr>() {
@@ -348,7 +348,7 @@ fn api_set_peer(
                         endpoint,
                         allowed_ips.as_slice(),
                         keepalive,
-                        preshared_key,
+                        preshared_key.clone(),
                     );
                     allowed_ips.clear(); //clear the vector content after update
                     match val.parse::<KeyBytes>() {

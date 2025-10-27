@@ -10,6 +10,7 @@ mod session;
 mod timers;
 
 pub use index::Index;
+use x25519_dalek::StaticSecret;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
@@ -208,7 +209,7 @@ impl Tunn {
         Self::new_at(
             static_private,
             peer_static_public,
-            preshared_key,
+            preshared_key.map(x25519::StaticSecret::from),
             persistent_keepalive,
             Index::new_local(index),
             rate_limiter,
@@ -222,7 +223,7 @@ impl Tunn {
     pub fn new_at(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<x25519::StaticSecret>,
         persistent_keepalive: Option<u16>,
         index: Index,
         rate_limiter: Option<Arc<RateLimiter>>,
@@ -237,7 +238,7 @@ impl Tunn {
                 static_public,
                 peer_static_public,
                 index,
-                preshared_key,
+                preshared_key.unwrap_or_else(|| StaticSecret::from([0u8; 32])),
                 now,
             ),
             sessions: Default::default(),
@@ -262,7 +263,7 @@ impl Tunn {
         self.handshake.remote_static_public()
     }
 
-    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+    pub fn preshared_key(&self) -> &x25519::StaticSecret {
         self.handshake.preshared_key()
     }
 
