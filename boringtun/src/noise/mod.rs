@@ -273,8 +273,10 @@ impl Tunn {
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         rate_limiter: Option<Arc<RateLimiter>>,
-    ) {
-        self.set_static_private_at(static_private, static_public, rate_limiter, Instant::now())
+    ) -> Result<(), WireGuardError> {
+        self.set_static_private_at(static_private, static_public, rate_limiter, Instant::now());
+
+        Ok(())
     }
 
     /// Update the private key and clear existing sessions
