@@ -238,7 +238,7 @@ impl Tunn {
                 static_public,
                 peer_static_public,
                 index,
-                preshared_key.unwrap_or_else(|| StaticSecret::from([0u8; 32])),
+                preshared_key,
                 now,
             ),
             sessions: Default::default(),

@@ -380,7 +380,7 @@ impl NoiseParams {
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
-        preshared_key: x25519::StaticSecret,
+        preshared_key: Option<x25519::StaticSecret>,
     ) -> NoiseParams {
         let static_shared = static_private.diffie_hellman(&peer_static_public);
 
@@ -392,7 +392,7 @@ impl NoiseParams {
             peer_static_public,
             static_shared,
             sending_mac1_key: initial_sending_mac_key,
-            preshared_key,
+            preshared_key: preshared_key.unwrap_or_else(|| x25519::StaticSecret::from([0u8; 32])),
         }
     }
 
@@ -419,7 +419,7 @@ impl Handshake {
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
         global_idx: Index,
-        preshared_key: x25519::StaticSecret,
+        preshared_key: Option<x25519_dalek::StaticSecret>,
         now: Instant,
     ) -> Handshake {
         let params = NoiseParams::new(
