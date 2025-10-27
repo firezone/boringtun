@@ -10,7 +10,6 @@ mod session;
 mod timers;
 
 pub use index::Index;
-use x25519_dalek::StaticSecret;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
