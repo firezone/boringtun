@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -131,7 +131,7 @@ impl Default for DeviceConfig {
 }
 
 pub struct Device {
-    key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
+    key_pair: Option<(x25519::StaticSecret, x25519::PublicKey, Instant)>,
     queue: Arc<EventPoll<Handler>>,
 
     listen_port: u16,
@@ -337,6 +337,8 @@ impl Device {
             None,
             rand::random(),
             Instant::now(),
+            device_key_pair.2,
+            Duration::ZERO,
         );
 
         let peer = Peer::new(tunn, next_index, endpoint, allowed_ips, preshared_key);
@@ -456,7 +458,7 @@ impl Device {
 
     fn set_key(&mut self, private_key: x25519::StaticSecret) {
         let public_key = x25519::PublicKey::from(&private_key);
-        let key_pair = Some((private_key.clone(), public_key));
+        let key_pair = Some((private_key.clone(), public_key, Instant::now()));
 
         // x25519 (rightly) doesn't let us expose secret keys for comparison.
         // If the public keys are the same, then the private keys are the same.
@@ -604,7 +606,7 @@ impl Device {
             Box::new(move |d, t| {
                 // Handler that handles anonymous packets over UDP
                 let mut iter = MAX_ITR;
-                let (private_key, public_key) = d.key_pair.as_ref().expect("Key not set");
+                let (private_key, public_key, _) = d.key_pair.as_ref().expect("Key not set");
 
                 let rate_limiter = d.rate_limiter.as_ref().unwrap();
 
