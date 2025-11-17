@@ -569,6 +569,9 @@ impl Handshake {
         aead_chacha20_open(&mut timestamp, &key, 0, packet.encrypted_timestamp, &hash)?;
 
         let timestamp = Tai64N::parse(&timestamp)?;
+
+        tracing::debug!(new_handshake_ts = %timestamp, last_handshake_ts = %self.last_handshake_timestamp);
+
         if !timestamp.after(&self.last_handshake_timestamp) {
             // Possibly a replay
             return Err(WireGuardError::WrongTai64nTimestamp);
