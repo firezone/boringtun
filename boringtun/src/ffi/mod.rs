@@ -25,7 +25,7 @@ use std::ptr;
 use std::ptr::null_mut;
 use std::slice;
 use std::sync::Once;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -286,6 +286,8 @@ pub unsafe extern "C" fn new_tunnel(
         Some(keep_alive)
     };
 
+    let now = Instant::now();
+
     let tunnel = Box::new(Mutex::new(Tunn::new_at(
         private_key,
         public_key,
@@ -294,7 +296,11 @@ pub unsafe extern "C" fn new_tunnel(
         Index::new_local(index),
         None,
         rand::random(),
-        Instant::now(),
+        now,
+        now,
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap(),
     )));
 
     PANIC_HOOK.call_once(|| {

@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -205,6 +205,7 @@ impl Tunn {
         index: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Self {
+        let now = Instant::now();
         Self::new_at(
             static_private,
             peer_static_public,
@@ -213,7 +214,11 @@ impl Tunn {
             Index::new_local(index),
             rate_limiter,
             rand::random(),
-            Instant::now(),
+            now,
+            now,
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap(),
         )
     }
 
@@ -228,6 +233,8 @@ impl Tunn {
         rate_limiter: Option<Arc<RateLimiter>>,
         rng_seed: u64,
         now: Instant,
+        unix_instant: Instant,
+        unix: Duration,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -238,7 +245,8 @@ impl Tunn {
                 peer_static_public,
                 index,
                 preshared_key,
-                now,
+                unix_instant,
+                unix,
             ),
             sessions: Default::default(),
             current: Default::default(),
@@ -755,6 +763,8 @@ mod tests {
             None,
             rand::random(),
             now,
+            now,
+            Duration::ZERO,
         );
 
         let their_tun = Tunn::new_at(
@@ -766,6 +776,8 @@ mod tests {
             None,
             rand::random(),
             now,
+            now,
+            Duration::ZERO,
         );
 
         (my_tun, their_tun)

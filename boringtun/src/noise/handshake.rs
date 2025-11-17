@@ -15,7 +15,8 @@ use constant_time_eq::constant_time_eq;
 use rand::rngs::OsRng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::convert::TryInto;
-use std::time::{Duration, Instant, SystemTime};
+use std::fmt::{self, Debug};
+use std::time::{Duration, Instant};
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
@@ -166,25 +167,23 @@ struct Tai64N {
 #[derive(Debug)]
 /// This struct computes a [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
 struct TimeStamper {
-    duration_at_start: Duration,
-    instant_at_start: Instant,
+    unix: Duration,
+    created_at: Instant,
 }
 
 impl TimeStamper {
     /// Create a new TimeStamper
-    pub fn new(now: Instant) -> TimeStamper {
+    pub fn new(now: Instant, unix: Duration) -> TimeStamper {
         TimeStamper {
-            duration_at_start: SystemTime::now() // This is technically impure but it doesn't matter because the generated timestamps are only offset by this.
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap(),
-            instant_at_start: now,
+            unix,
+            created_at: now,
         }
     }
 
     /// Generate a 12 byte timestamp for the given instant.
     pub fn stamp(&self, now: Instant) -> [u8; 12] {
         let mut ext_stamp = [0u8; 12];
-        let stamp = now.duration_since(self.instant_at_start) + self.duration_at_start;
+        let stamp = now.duration_since(self.created_at) + self.unix;
         ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + Tai64N::BASE).to_be_bytes());
         ext_stamp[8..12].copy_from_slice(&stamp.subsec_nanos().to_be_bytes());
         ext_stamp
@@ -436,7 +435,8 @@ impl Handshake {
         peer_static_public: x25519::PublicKey,
         global_idx: Index,
         preshared_key: Option<x25519_dalek::StaticSecret>,
-        now: Instant,
+        unix_instant: Instant,
+        unix: Duration,
     ) -> Handshake {
         let params = NoiseParams::new(
             static_private,
@@ -451,7 +451,7 @@ impl Handshake {
             previous: HandshakeState::None,
             state: HandshakeState::None,
             last_handshake_timestamp: Tai64N::zero(),
-            stamper: TimeStamper::new(now),
+            stamper: TimeStamper::new(unix_instant, unix),
             cookies: Default::default(),
             last_rtt: None,
         }
