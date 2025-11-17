@@ -156,8 +156,8 @@ fn aead_chacha20_open_inner(
     Ok(())
 }
 
-#[derive(Debug)]
 /// This struct represents a 12 byte [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp
+#[derive(PartialEq, Eq)]
 struct Tai64N {
     secs: u64,
     nano: u32,
@@ -183,16 +183,17 @@ impl TimeStamper {
 
     /// Generate a 12 byte timestamp for the given instant.
     pub fn stamp(&self, now: Instant) -> [u8; 12] {
-        const TAI64_BASE: u64 = (1u64 << 62) + 37;
         let mut ext_stamp = [0u8; 12];
         let stamp = now.duration_since(self.instant_at_start) + self.duration_at_start;
-        ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + TAI64_BASE).to_be_bytes());
+        ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + Tai64N::BASE).to_be_bytes());
         ext_stamp[8..12].copy_from_slice(&stamp.subsec_nanos().to_be_bytes());
         ext_stamp
     }
 }
 
 impl Tai64N {
+    const BASE: u64 = (1u64 << 62) + 37;
+
     /// A zeroed out timestamp
     fn zero() -> Tai64N {
         Tai64N { secs: 0, nano: 0 }
@@ -223,6 +224,21 @@ impl Tai64N {
     /// by the other timestamp
     pub fn after(&self, other: &Tai64N) -> bool {
         (self.secs > other.secs) || ((self.secs == other.secs) && (self.nano > other.nano))
+    }
+}
+
+impl fmt::Display for Tai64N {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let duration = Duration::from_secs(self.secs.saturating_sub(Self::BASE))
+            + Duration::from_nanos(self.nano as u64);
+
+        duration.fmt(f)
+    }
+}
+
+impl fmt::Debug for Tai64N {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self, f)
     }
 }
 
