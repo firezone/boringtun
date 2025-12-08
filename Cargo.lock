@@ -114,7 +114,7 @@ dependencies = [
  "rand",
  "ring",
  "socket2",
- "thiserror 1.0.55",
+ "thiserror 2.0.17",
  "tracing",
  "tracing-subscriber",
  "untrusted",
@@ -613,7 +613,7 @@ dependencies = [
  "combine",
  "jni-sys",
  "log",
- "thiserror 1.0.55",
+ "thiserror 1.0.69",
  "walkdir",
 ]
 
@@ -1108,11 +1108,11 @@ checksum = "b1141d4d61095b28419e22cb0bbf02755f5e54e0526f97f1e3d1d160e60885fb"
 
 [[package]]
 name = "thiserror"
-version = "1.0.55"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e3de26b0965292219b4287ff031fcba86837900fe9cd2b34ea8ad893c0953d2"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl 1.0.55",
+ "thiserror-impl 1.0.69",
 ]
 
 [[package]]
@@ -1126,9 +1126,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.55"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "268026685b2be38d7103e9e507c938a1fcb3d7e6eb15e87870b617bf37b6d581"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",
