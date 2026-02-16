@@ -85,6 +85,25 @@ jobs:
           tool: cargo-hack
       - run: cargo hack test --each-feature
 
+  unused-dependencies:
+    name: unused-dependencies-${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        runs-on: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+        with:
+          toolchain: nightly-2026-01-30
+      - uses: taiki-e/install-action@288875dd3d64326724fa6d9593062d9f8ba0b131 # v2.67.30
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tool: cargo-udeps
+      - run: cargo +nightly-2026-01-30 udeps --all-targets --all-features
+        name: cargo udeps
+
   integration-tests:
     strategy:
       matrix:
