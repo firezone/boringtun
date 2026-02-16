@@ -117,7 +117,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
- "untrusted",
  "x25519-dalek",
 ]
 
