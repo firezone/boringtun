@@ -17,7 +17,7 @@ default = []
 device = ["socket2", "thiserror"]
 jni-bindings = ["ffi-bindings", "jni"]
 ffi-bindings = ["tracing-subscriber"]
-mock-instant = []                      # Deprecated.
+mock-instant = ["mock_instant"]        # Deprecated.
 mock_instant = []                      # Deprecated.
 
 [dependencies]
