@@ -54,7 +54,7 @@ nix = { version = "0.31", default-features = false, features = [
 [dev-dependencies]
 etherparse = "0.19"
 tracing-subscriber = "0.3"
-criterion = { version = "0.8.1", features = ["html_reports"] }
+criterion = { version = "0.8.2", features = ["html_reports"] }
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
