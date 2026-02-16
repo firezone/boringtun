@@ -298,13 +298,6 @@ enum HandshakeState {
     None,
     /// We initiated the handshake
     InitSent(HandshakeInitSentState),
-    /// Handshake initiated by peer
-    InitReceived {
-        hash: [u8; KEY_LEN],
-        chaining_key: [u8; KEY_LEN],
-        peer_ephemeral_public: x25519::PublicKey,
-        peer_index: u32,
-    },
     /// Handshake was established too long ago (implies no handshake is in progress)
     Expired,
 }
@@ -581,17 +574,14 @@ impl Handshake {
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, packet.encrypted_timestamp);
 
-        self.previous = std::mem::replace(
-            &mut self.state,
-            HandshakeState::InitReceived {
-                chaining_key,
-                hash,
-                peer_ephemeral_public,
-                peer_index,
-            },
-        );
-
-        self.format_handshake_response(dst, now)
+        self.format_handshake_response(
+            hash,
+            chaining_key,
+            peer_ephemeral_public,
+            peer_index,
+            dst,
+            now,
+        )
     }
 
     pub(super) fn receive_handshake_response(
@@ -835,6 +825,10 @@ impl Handshake {
 
     fn format_handshake_response<'a>(
         &mut self,
+        mut hash: [u8; KEY_LEN],
+        mut chaining_key: [u8; KEY_LEN],
+        peer_ephemeral_public: x25519::PublicKey,
+        peer_index: u32,
         dst: &'a mut [u8],
         now: Instant,
     ) -> Result<(&'a mut [u8], Session), WireGuardError> {
@@ -844,19 +838,6 @@ impl Handshake {
 
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
-
-        let state = std::mem::replace(&mut self.state, HandshakeState::None);
-        let (mut chaining_key, mut hash, peer_ephemeral_public, peer_index) = match state {
-            HandshakeState::InitReceived {
-                chaining_key,
-                hash,
-                peer_ephemeral_public,
-                peer_index,
-            } => (chaining_key, hash, peer_ephemeral_public, peer_index),
-            _ => {
-                panic!("Unexpected attempt to call send_handshake_response");
-            }
-        };
 
         let (message_type, rest) = dst.split_at_mut(4);
         let (sender_index, rest) = rest.split_at_mut(4);
