@@ -459,7 +459,7 @@ impl Handshake {
     }
 
     pub(crate) fn is_in_progress(&self) -> bool {
-        !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
+        matches!(self.state, HandshakeState::InitSent(_))
     }
 
     pub(crate) fn timer(&self) -> Option<(Instant, Index)> {
