@@ -46,7 +46,7 @@ thiserror = { version = "2", optional = true }
 constant_time_eq = "0.4.2"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.30", default-features = false, features = [
+nix = { version = "0.31", default-features = false, features = [
     "time",
     "user",
 ] }
