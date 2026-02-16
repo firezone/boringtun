@@ -14,15 +14,15 @@ edition = "2021"
 
 [features]
 default = []
-device = ["dep:socket2", "dep:thiserror", "dep:nix", "dep:base64", "dep:hex", "dep:libc", "dep:ip_network", "dep:ip_network_table"]
-jni-bindings = ["ffi-bindings", "dep:jni"]
-ffi-bindings = ["dep:tracing-subscriber", "dep:base64", "dep:hex", "dep:libc"]
-mock-instant = ["mock_instant"]        # Deprecated.
-mock_instant = []                      # Deprecated.
-thiserror = []                         # Deprecated.
-tracing-subscriber = []                # Deprecated.
-jni = []                               # Deprecated.
-socket2 = []                           # Deprecated.
+device = ["socket2", "thiserror", "dep:nix", "dep:base64", "dep:hex", "dep:libc", "dep:ip_network", "dep:ip_network_table"]
+jni-bindings = ["ffi-bindings", "jni"]
+ffi-bindings = ["tracing-subscriber", "dep:base64", "dep:hex", "dep:libc"]
+mock-instant = ["mock_instant"]                  # Deprecated.
+mock_instant = []                                # Deprecated.
+thiserror = ["dep:thiserror"]                    # Deprecated.
+tracing-subscriber = ["dep:tracing-subscriber"]  # Deprecated.
+jni = ["dep:jni"]                                # Deprecated.
+socket2 = ["dep:socket2"]                        # Deprecated.
 
 [dependencies]
 base64 = { version = "0.22", optional = true }
