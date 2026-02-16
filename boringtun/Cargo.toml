@@ -19,6 +19,10 @@ jni-bindings = ["ffi-bindings", "dep:jni"]
 ffi-bindings = ["dep:tracing-subscriber", "dep:base64", "dep:hex", "dep:libc"]
 mock-instant = ["mock_instant"]        # Deprecated.
 mock_instant = []                      # Deprecated.
+thiserror = []                         # Deprecated.
+tracing-subscriber = []                # Deprecated.
+jni = []                               # Deprecated.
+socket2 = []                           # Deprecated.
 
 [dependencies]
 base64 = { version = "0.22", optional = true }
