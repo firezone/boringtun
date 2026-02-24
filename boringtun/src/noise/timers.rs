@@ -172,14 +172,14 @@ impl Tunn {
 
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
-    fn clear_all(&mut self) {
+    fn clear_all(&mut self, now: Instant) {
         for session in &mut self.sessions {
             *session = None;
         }
 
         self.packet_queue.clear();
 
-        self.timers.clear(Instant::now());
+        self.timers.clear(now);
     }
 
     fn expire_sessions(&mut self, now: Instant) {
@@ -272,7 +272,7 @@ impl Tunn {
         if now - session_established >= REJECT_AFTER_TIME * 3 {
             tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
             self.handshake.set_expired();
-            self.clear_all();
+            self.clear_all(now);
             return TunnResult::Err(WireGuardError::ConnectionExpired);
         }
 
@@ -285,7 +285,7 @@ impl Tunn {
                 // this timer is reset.
                 tracing::debug!(%local_idx, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                 self.handshake.set_expired();
-                self.clear_all();
+                self.clear_all(now);
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
             }
 
