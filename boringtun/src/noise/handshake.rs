@@ -570,12 +570,12 @@ impl Handshake {
         packet: HandshakeResponse,
         now: Instant,
     ) -> Result<Session, WireGuardError> {
-        // Check if there is a handshake awaiting a response and return the correct one
-        let (state, is_previous) = match (&self.state, &self.previous) {
-            (Some(s), _) if s.local_index == packet.receiver_idx => (s, false),
-            (_, Some(s)) if s.local_index == packet.receiver_idx => (s, true),
-            _ => return Err(WireGuardError::UnexpectedPacket),
-        };
+        let receiver_index = packet.receiver_idx;
+
+        let state = None
+            .or_else(|| self.state.take_if(|s| s.local_index == receiver_index))
+            .or_else(|| self.previous.take_if(|s| s.local_index == receiver_index))
+            .ok_or(WireGuardError::UnexpectedPacket)?;
 
         let peer_index = packet.sender_idx;
         let local_index = state.local_index;
@@ -637,11 +637,6 @@ impl Handshake {
         let rtt_time = now.duration_since(state.time_sent);
         self.last_rtt = Some(rtt_time.as_millis() as u32);
 
-        if is_previous {
-            self.previous = None;
-        } else {
-            self.state = None;
-        }
         Ok(Session::new(
             local_index,
             Index::from_peer(peer_index),
