@@ -178,7 +178,7 @@ impl Tunn {
         }
 
         self.packet_queue.clear();
-
+        self.handshake.clear();
         self.timers.clear(now);
     }
 
@@ -253,10 +253,6 @@ impl Tunn {
         let data_packet_sent = self.timers[TimeLastDataPacketSent];
         let persistent_keepalive = self.timers.persistent_keepalive;
 
-        if self.handshake.is_expired() {
-            return TunnResult::Err(WireGuardError::ConnectionExpired);
-        }
-
         // Clear cookie after COOKIE_EXPIRATION_TIME
         if self
             .handshake
@@ -271,8 +267,8 @@ impl Tunn {
         // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
         if now - session_established >= REJECT_AFTER_TIME * 3 {
             tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
-            self.handshake.set_expired();
             self.clear_all(now);
+
             return TunnResult::Err(WireGuardError::ConnectionExpired);
         }
 
@@ -284,8 +280,8 @@ impl Tunn {
                 // up to be sent. If a packet is explicitly queued up to be sent, then
                 // this timer is reset.
                 tracing::debug!(%local_idx, "CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
-                self.handshake.set_expired();
                 self.clear_all(now);
+
                 return TunnResult::Err(WireGuardError::ConnectionExpired);
             }
 

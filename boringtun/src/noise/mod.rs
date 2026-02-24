@@ -167,10 +167,6 @@ impl Tunn {
         })
     }
 
-    pub fn is_expired(&self) -> bool {
-        self.handshake.is_expired()
-    }
-
     pub fn dst_address(packet: &[u8]) -> Option<IpAddr> {
         if packet.is_empty() {
             return None;
@@ -573,10 +569,6 @@ impl Tunn {
     ) -> TunnResult<'a> {
         if self.handshake.is_in_progress() && !force_resend {
             return TunnResult::Done;
-        }
-
-        if self.handshake.is_expired() {
-            self.timers.clear(now);
         }
 
         let starting_new_handshake = !self.handshake.is_in_progress();

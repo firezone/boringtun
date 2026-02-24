@@ -298,8 +298,6 @@ enum HandshakeState {
     None,
     /// We initiated the handshake
     InitSent(HandshakeInitSentState),
-    /// Handshake was established too long ago (implies no handshake is in progress)
-    Expired,
 }
 
 pub struct Handshake {
@@ -473,13 +471,9 @@ impl Handshake {
         }
     }
 
-    pub(crate) fn set_expired(&mut self) {
-        self.previous = HandshakeState::Expired;
-        self.state = HandshakeState::Expired;
-    }
-
-    pub(crate) fn is_expired(&self) -> bool {
-        matches!(self.state, HandshakeState::Expired)
+    pub(crate) fn clear(&mut self) {
+        self.previous = HandshakeState::None;
+        self.state = HandshakeState::None;
     }
 
     pub(crate) fn cookie_expiration(&self) -> Option<Instant> {
