@@ -292,22 +292,14 @@ impl std::fmt::Debug for HandshakeInitSentState {
     }
 }
 
-#[derive(Debug)]
-enum HandshakeState {
-    /// No handshake in process
-    None,
-    /// We initiated the handshake
-    InitSent(HandshakeInitSentState),
-}
-
 pub struct Handshake {
     params: NoiseParams,
     /// Index of the next session
     next_index: Index,
     /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed response to a handshake with bad networks
-    previous: HandshakeState,
+    previous: Option<HandshakeInitSentState>,
     /// Current handshake state
-    state: HandshakeState,
+    state: Option<HandshakeInitSentState>,
     cookies: Cookies,
     /// The timestamp of the last handshake we received
     last_handshake_timestamp: Tai64N,
@@ -439,8 +431,8 @@ impl Handshake {
         Handshake {
             params,
             next_index: global_idx,
-            previous: HandshakeState::None,
-            state: HandshakeState::None,
+            previous: None,
+            state: None,
             last_handshake_timestamp: Tai64N::zero(),
             stamper: TimeStamper::new(unix_instant, unix),
             cookies: Default::default(),
@@ -457,23 +449,18 @@ impl Handshake {
     }
 
     pub(crate) fn is_in_progress(&self) -> bool {
-        matches!(self.state, HandshakeState::InitSent(_))
+        self.state.is_some()
     }
 
     pub(crate) fn timer(&self) -> Option<(Instant, Index)> {
-        match self.state {
-            HandshakeState::InitSent(HandshakeInitSentState {
-                time_sent,
-                local_index,
-                ..
-            }) => Some((time_sent, local_index)),
-            _ => None,
-        }
+        let init = self.state.as_ref()?;
+
+        Some((init.time_sent, init.local_index))
     }
 
     pub(crate) fn clear(&mut self) {
-        self.previous = HandshakeState::None;
-        self.state = HandshakeState::None;
+        self.previous = None;
+        self.state = None;
     }
 
     pub(crate) fn cookie_expiration(&self) -> Option<Instant> {
@@ -585,8 +572,8 @@ impl Handshake {
     ) -> Result<Session, WireGuardError> {
         // Check if there is a handshake awaiting a response and return the correct one
         let (state, is_previous) = match (&self.state, &self.previous) {
-            (HandshakeState::InitSent(s), _) if s.local_index == packet.receiver_idx => (s, false),
-            (_, HandshakeState::InitSent(s)) if s.local_index == packet.receiver_idx => (s, true),
+            (Some(s), _) if s.local_index == packet.receiver_idx => (s, false),
+            (_, Some(s)) if s.local_index == packet.receiver_idx => (s, true),
             _ => return Err(WireGuardError::UnexpectedPacket),
         };
 
@@ -651,9 +638,9 @@ impl Handshake {
         self.last_rtt = Some(rtt_time.as_millis() as u32);
 
         if is_previous {
-            self.previous = HandshakeState::None;
+            self.previous = None;
         } else {
-            self.state = HandshakeState::None;
+            self.state = None;
         }
         Ok(Session::new(
             local_index,
@@ -800,16 +787,13 @@ impl Handshake {
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, encrypted_timestamp);
 
-        self.previous = std::mem::replace(
-            &mut self.state,
-            HandshakeState::InitSent(HandshakeInitSentState {
-                local_index,
-                chaining_key,
-                hash,
-                ephemeral_private,
-                time_sent: now,
-            }),
-        );
+        self.previous = self.state.replace(HandshakeInitSentState {
+            local_index,
+            chaining_key,
+            hash,
+            ephemeral_private,
+            time_sent: now,
+        });
 
         let packet =
             self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_INIT_SZ])?;
