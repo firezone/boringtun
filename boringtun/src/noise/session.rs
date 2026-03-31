@@ -8,11 +8,9 @@ use super::{
 };
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
+use portable_atomic::{AtomicU64, Ordering};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
-use std::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::Instant,
-};
+use std::time::Instant;
 
 pub struct Session {
     established_at: Instant,

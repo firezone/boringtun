@@ -3,7 +3,6 @@ use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
 
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use aead::generic_array::GenericArray;
@@ -11,6 +10,7 @@ use aead::{AeadInPlace, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
 use constant_time_eq::constant_time_eq;
 use parking_lot::Mutex;
+use portable_atomic::{AtomicU64, Ordering};
 use rand::{rngs::OsRng, RngCore};
 
 const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
