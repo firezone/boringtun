@@ -75,6 +75,7 @@ pub struct Timers {
     jitter_rng: StdRng,
 
     rekey_attempt_time: Duration,
+    keepalive_timeout: Duration,
 }
 
 impl Timers {
@@ -94,6 +95,7 @@ impl Timers {
             send_handshake_at: None,
             jitter_rng: StdRng::seed_from_u64(rng_seed),
             rekey_attempt_time: REKEY_ATTEMPT_TIME,
+            keepalive_timeout: KEEPALIVE_TIMEOUT,
         }
     }
 
@@ -117,6 +119,10 @@ impl Timers {
 
     pub(crate) fn set_rekey_attempt_time(&mut self, rekey_attempt_time: Duration) {
         self.rekey_attempt_time = rekey_attempt_time;
+    }
+
+    pub(crate) fn set_keepalive_timeout(&mut self, keepalive_timeout: Duration) {
+        self.keepalive_timeout = keepalive_timeout;
     }
 }
 
@@ -143,7 +149,7 @@ impl Tunn {
                 self.timers.want_passive_keepalive_at = None;
             }
             TimeLastDataPacketReceived => {
-                self.timers.want_passive_keepalive_at = Some(now + KEEPALIVE_TIMEOUT);
+                self.timers.want_passive_keepalive_at = Some(now + self.timers.keepalive_timeout);
             }
             TimeLastDataPacketSent => {
                 match self.timers.want_handshake_at {
@@ -155,7 +161,7 @@ impl Tunn {
                         // We sent a packet and haven't heard back yet.
                         // Start a timer for when we want to make a new handshake.
                         self.timers.want_handshake_at =
-                            Some(now + KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                            Some(now + self.timers.keepalive_timeout + REKEY_TIMEOUT)
                     }
                 }
             }
@@ -318,7 +324,7 @@ impl Tunn {
                 // handshake.
                 if session_established < data_packet_received
                     && now - session_established
-                        >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
+                        >= REJECT_AFTER_TIME - self.timers.keepalive_timeout - REKEY_TIMEOUT
                 {
                     tracing::debug!(
                         "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT (on receive))"

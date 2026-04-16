@@ -317,6 +317,13 @@ impl Tunn {
         self.timers.set_rekey_attempt_time(rekey_attempt_time);
     }
 
+    /// Set the `KEEPALIVE_TIMEOUT`.
+    ///
+    /// Defaults to 10s.
+    pub fn set_keepalive_timeout(&mut self, keepalive_timeout: Duration) {
+        self.timers.set_keepalive_timeout(keepalive_timeout);
+    }
+
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
     ///
