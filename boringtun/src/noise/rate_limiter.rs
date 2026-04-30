@@ -11,7 +11,7 @@ use chacha20poly1305::{Key, XChaCha20Poly1305};
 use constant_time_eq::constant_time_eq;
 use parking_lot::Mutex;
 use portable_atomic::{AtomicU64, Ordering};
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
 
 const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
@@ -52,7 +52,7 @@ impl RateLimiter {
     #[deprecated(note = "Prefer `RateLimiter::new_at` to avoid time-impurity")]
     pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
         let mut secret_key = [0u8; 16];
-        OsRng.fill_bytes(&mut secret_key);
+        rand::rng().fill_bytes(&mut secret_key);
         RateLimiter {
             nonce_key: Self::rand_bytes(),
             secret_key,
@@ -68,7 +68,7 @@ impl RateLimiter {
 
     pub fn new_at(public_key: &crate::x25519::PublicKey, limit: u64, now: Instant) -> Self {
         let mut secret_key = [0u8; 16];
-        OsRng.fill_bytes(&mut secret_key);
+        rand::rng().fill_bytes(&mut secret_key);
         RateLimiter {
             nonce_key: Self::rand_bytes(),
             secret_key,
@@ -84,7 +84,7 @@ impl RateLimiter {
 
     fn rand_bytes() -> [u8; 32] {
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        rand::rng().fill_bytes(&mut key);
         key
     }
 
