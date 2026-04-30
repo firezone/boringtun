@@ -709,11 +709,7 @@ impl Handshake {
     }
 
     // Compute and append mac1 and mac2 to a handshake message
-    fn append_mac1_and_mac2<'a>(
-        &mut self,
-        local_index: Index,
-        dst: &'a mut [u8],
-    ) -> Result<&'a mut [u8], WireGuardError> {
+    fn append_mac1_and_mac2<'a>(&mut self, local_index: Index, dst: &'a mut [u8]) -> &'a mut [u8] {
         let mac1_off = dst.len() - 32;
         let mac2_off = dst.len() - 16;
 
@@ -734,7 +730,8 @@ impl Handshake {
 
         self.cookies.index = local_index;
         self.cookies.last_mac1 = Some(msg_mac1);
-        Ok(dst)
+
+        dst
     }
 
     pub(super) fn format_handshake_initiation<'a>(
@@ -817,8 +814,7 @@ impl Handshake {
             }),
         );
 
-        let packet =
-            self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_INIT_SZ])?;
+        let packet = self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_INIT_SZ]);
 
         Ok((packet, local_index))
     }
@@ -903,7 +899,7 @@ impl Handshake {
         let temp2 = b2s_hmac(&temp1, &[0x01]);
         let temp3 = b2s_hmac2(&temp1, &temp2, &[0x02]);
 
-        let dst = self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_RESP_SZ])?;
+        let dst = self.append_mac1_and_mac2(local_index, &mut dst[..super::HANDSHAKE_RESP_SZ]);
 
         Ok((
             dst,
