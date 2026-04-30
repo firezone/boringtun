@@ -6,7 +6,7 @@ use crate::noise::{Tunn, TunnResult};
 use std::iter;
 use std::ops::{Index, IndexMut};
 
-use rand::Rng;
+use rand::RngExt;
 use rand::{rngs::StdRng, SeedableRng};
 use std::time::{Duration, Instant};
 
@@ -373,7 +373,7 @@ impl Tunn {
             let jitter = self
                 .timers
                 .jitter_rng
-                .gen_range(Duration::ZERO..=MAX_JITTER);
+                .random_range(Duration::ZERO..=MAX_JITTER);
 
             let existing = self.timers.send_handshake_at.replace(now + jitter);
             debug_assert!(
