@@ -29,6 +29,7 @@ base64 = { version = "0.22", optional = true }
 hex = { version = "0.4", optional = true }
 libc = { version = "0.2", optional = true }
 parking_lot = "0.12"
+portable-atomic = { version = "1.13.1", features = ["fallback"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
 ip_network = { version = "0.4.1", optional = true }
