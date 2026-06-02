@@ -47,7 +47,7 @@ blake2 = "=0.11.0-rc.6"
 hmac = "0.13"
 typenum = "1.20.0"
 jni = { version = "0.19.0", optional = true }
-socket2 = { version = "0.6.3", features = ["all"], optional = true }
+socket2 = { version = "0.6.4", features = ["all"], optional = true }
 thiserror = { version = "2", optional = true }
 constant_time_eq = "0.5.0"
 
