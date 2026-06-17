@@ -347,28 +347,57 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> TunnResult<'a> {
-        if let Some(session) = self.sessions[self.current]
+        match self.encapsulate_data_at(src, dst, now) {
+            Ok(Some(len)) => TunnResult::WriteToNetwork(&mut dst[..len]),
+            Ok(None) => {
+                // If there is no session, queue the packet for future retry
+                self.queue_packet(src);
+                // Initiate a new handshake if none is in progress
+                self.format_handshake_initiation_at(dst, false, now)
+            }
+            Err(e) => TunnResult::Err(e),
+        }
+    }
+
+    /// Encapsulate a single packet from the tunnel interface **in place**, but only if
+    /// there is currently a usable session.
+    ///
+    /// Returns `Ok(Some(len))` when the encrypted WireGuard data message (`len` bytes) has
+    /// been written to the start of `dst`. Returns `Ok(None)` when there is no usable
+    /// session; in that case `dst` is left untouched and - unlike [`Tunn::encapsulate_at`] -
+    /// the packet is **not** queued and **no** handshake is initiated.
+    ///
+    /// This lets callers that already know the exact output length (a data message is always
+    /// `src.len() + 32` bytes, no padding) encrypt directly into a destination buffer (e.g. a
+    /// GSO batch) without an intermediate copy, and handle the no-session case themselves.
+    ///
+    /// # Errors
+    /// Returns [`WireGuardError::DestinationBufferTooSmall`] if `dst` is smaller than
+    /// `src.len() + 32`.
+    pub fn encapsulate_data_at(
+        &mut self,
+        src: &[u8],
+        dst: &mut [u8],
+        now: Instant,
+    ) -> Result<Option<usize>, WireGuardError> {
+        let Some(session) = self.sessions[self.current]
             .as_ref()
             .filter(|s| s.should_use_at(now) || self.timers.is_responder())
-        {
-            // Send the packet using an established session
-            let packet = match session.format_packet_data(src, dst) {
-                Ok(p) => p,
-                Err(e) => return TunnResult::Err(e),
-            };
-            self.timer_tick(TimerName::TimeLastPacketSent, now);
-            // Exclude Keepalive packets from timer update.
-            if !src.is_empty() {
-                self.timer_tick(TimerName::TimeLastDataPacketSent, now);
-            }
-            self.tx_bytes += src.len();
-            return TunnResult::WriteToNetwork(packet);
-        }
+        else {
+            return Ok(None);
+        };
 
-        // If there is no session, queue the packet for future retry
-        self.queue_packet(src);
-        // Initiate a new handshake if none is in progress
-        self.format_handshake_initiation_at(dst, false, now)
+        // Send the packet using an established session
+        let len = session.format_packet_data(src, dst)?.len();
+
+        self.timer_tick(TimerName::TimeLastPacketSent, now);
+        // Exclude Keepalive packets from timer update.
+        if !src.is_empty() {
+            self.timer_tick(TimerName::TimeLastDataPacketSent, now);
+        }
+        self.tx_bytes += src.len();
+
+        Ok(Some(len))
     }
 
     /// Receives a UDP datagram from the network and parses it.
@@ -913,6 +942,61 @@ mod tests {
         let keepalive = parse_handshake_resp(&mut my_tun, &resp, now);
         let packet = Tunn::parse_incoming_packet(&keepalive).unwrap();
         assert!(matches!(packet, Packet::PacketData(_)));
+    }
+
+    #[test]
+    fn encapsulate_data_without_session_reports_none_and_has_no_side_effects() {
+        let now = Instant::now();
+
+        let (mut my_tun, _their_tun) = create_two_tuns(now);
+
+        let packet = create_ipv4_udp_packet();
+        let mut dst = vec![0u8; 2048];
+
+        // Without a usable session, the data-only path writes nothing and reports `None`.
+        let result = my_tun.encapsulate_data_at(&packet, &mut dst, now).unwrap();
+        assert_eq!(result, None);
+
+        // Unlike `encapsulate_at`, it neither queued the packet nor started a handshake, so the
+        // following `encapsulate_at` is what initiates the (first ever) handshake.
+        let mut handshake_buf = vec![0u8; 2048];
+        let TunnResult::WriteToNetwork(handshake) =
+            my_tun.encapsulate_at(&packet, &mut handshake_buf, now)
+        else {
+            panic!("expected a handshake to be initiated");
+        };
+        let parsed = Tunn::parse_incoming_packet(handshake).unwrap();
+        assert!(matches!(parsed, Packet::HandshakeInit(_)));
+    }
+
+    #[test]
+    fn encapsulate_data_with_session_writes_in_place() {
+        let now = Instant::now();
+
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
+
+        let packet = create_ipv4_udp_packet();
+        let mut dst = vec![0u8; 2048];
+
+        let len = my_tun
+            .encapsulate_data_at(&packet, &mut dst, now)
+            .unwrap()
+            .expect("a usable session exists after the handshake");
+
+        // A WireGuard data message has exactly 32 bytes of overhead (no padding).
+        assert_eq!(len, packet.len() + DATA_OVERHEAD_SZ);
+
+        // The bytes written in place form a valid data packet that the peer can decapsulate.
+        let parsed = Tunn::parse_incoming_packet(&dst[..len]).unwrap();
+        assert!(matches!(parsed, Packet::PacketData(_)));
+
+        let mut out = vec![0u8; 2048];
+        let TunnResult::WriteToTunnelV4(decapsulated, _) =
+            their_tun.decapsulate_at(None, &dst[..len], &mut out, now)
+        else {
+            panic!("expected to decapsulate the in-place data packet");
+        };
+        assert_eq!(decapsulated, &packet[..]);
     }
 
     #[test]
