@@ -366,14 +366,6 @@ impl Tunn {
     /// to the start of `dst`. Returns `Err(WireGuardError::NoCurrentSession)` when there is no
     /// usable session; in that case `dst` is left untouched and - unlike [`Tunn::encapsulate_at`] -
     /// the packet is **not** queued and **no** handshake is initiated.
-    ///
-    /// This lets callers that already know the exact output length (a data message is always
-    /// `src.len() + 32` bytes, no padding) encrypt directly into a destination buffer they
-    /// already own, without an intermediate copy, and handle the no-session case themselves.
-    ///
-    /// # Errors
-    /// Returns [`WireGuardError::NoCurrentSession`] if there is no usable session, or
-    /// [`WireGuardError::DestinationBufferTooSmall`] if `dst` is smaller than `src.len() + 32`.
     pub fn encapsulate_data_at(
         &mut self,
         src: &[u8],
