@@ -368,8 +368,8 @@ impl Tunn {
     /// the packet is **not** queued and **no** handshake is initiated.
     ///
     /// This lets callers that already know the exact output length (a data message is always
-    /// `src.len() + 32` bytes, no padding) encrypt directly into a destination buffer (e.g. a
-    /// GSO batch) without an intermediate copy, and handle the no-session case themselves.
+    /// `src.len() + 32` bytes, no padding) encrypt directly into a destination buffer they
+    /// already own, without an intermediate copy, and handle the no-session case themselves.
     ///
     /// # Errors
     /// Returns [`WireGuardError::DestinationBufferTooSmall`] if `dst` is smaller than
