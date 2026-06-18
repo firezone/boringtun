@@ -348,8 +348,8 @@ impl Tunn {
         now: Instant,
     ) -> TunnResult<'a> {
         match self.encapsulate_data_at(src, dst, now) {
-            Ok(Some(len)) => TunnResult::WriteToNetwork(&mut dst[..len]),
-            Ok(None) => {
+            Ok(len) => TunnResult::WriteToNetwork(&mut dst[..len]),
+            Err(WireGuardError::NoCurrentSession) => {
                 // If there is no session, queue the packet for future retry
                 self.queue_packet(src);
                 // Initiate a new handshake if none is in progress
@@ -362,9 +362,9 @@ impl Tunn {
     /// Encapsulate a single packet from the tunnel interface **in place**, but only if
     /// there is currently a usable session.
     ///
-    /// Returns `Ok(Some(len))` when the encrypted WireGuard data message (`len` bytes) has
-    /// been written to the start of `dst`. Returns `Ok(None)` when there is no usable
-    /// session; in that case `dst` is left untouched and - unlike [`Tunn::encapsulate_at`] -
+    /// Returns `Ok(len)` when the encrypted WireGuard data message (`len` bytes) has been written
+    /// to the start of `dst`. Returns `Err(WireGuardError::NoCurrentSession)` when there is no
+    /// usable session; in that case `dst` is left untouched and - unlike [`Tunn::encapsulate_at`] -
     /// the packet is **not** queued and **no** handshake is initiated.
     ///
     /// This lets callers that already know the exact output length (a data message is always
@@ -372,19 +372,19 @@ impl Tunn {
     /// already own, without an intermediate copy, and handle the no-session case themselves.
     ///
     /// # Errors
-    /// Returns [`WireGuardError::DestinationBufferTooSmall`] if `dst` is smaller than
-    /// `src.len() + 32`.
+    /// Returns [`WireGuardError::NoCurrentSession`] if there is no usable session, or
+    /// [`WireGuardError::DestinationBufferTooSmall`] if `dst` is smaller than `src.len() + 32`.
     pub fn encapsulate_data_at(
         &mut self,
         src: &[u8],
         dst: &mut [u8],
         now: Instant,
-    ) -> Result<Option<usize>, WireGuardError> {
+    ) -> Result<usize, WireGuardError> {
         let Some(session) = self.sessions[self.current]
             .as_ref()
             .filter(|s| s.should_use_at(now) || self.timers.is_responder())
         else {
-            return Ok(None);
+            return Err(WireGuardError::NoCurrentSession);
         };
 
         // Send the packet using an established session
@@ -397,7 +397,7 @@ impl Tunn {
         }
         self.tx_bytes += src.len();
 
-        Ok(Some(len))
+        Ok(len)
     }
 
     /// Receives a UDP datagram from the network and parses it.
@@ -945,7 +945,7 @@ mod tests {
     }
 
     #[test]
-    fn encapsulate_data_without_session_reports_none_and_has_no_side_effects() {
+    fn encapsulate_data_without_session_errors_and_has_no_side_effects() {
         let now = Instant::now();
 
         let (mut my_tun, _their_tun) = create_two_tuns(now);
@@ -953,9 +953,9 @@ mod tests {
         let packet = create_ipv4_udp_packet();
         let mut dst = vec![0u8; 2048];
 
-        // Without a usable session, the data-only path writes nothing and reports `None`.
-        let result = my_tun.encapsulate_data_at(&packet, &mut dst, now).unwrap();
-        assert_eq!(result, None);
+        // Without a usable session, the data-only path writes nothing and reports an error.
+        let result = my_tun.encapsulate_data_at(&packet, &mut dst, now);
+        assert!(matches!(result, Err(WireGuardError::NoCurrentSession)));
 
         // Unlike `encapsulate_at`, it neither queued the packet nor started a handshake, so the
         // following `encapsulate_at` is what initiates the (first ever) handshake.
@@ -980,7 +980,6 @@ mod tests {
 
         let len = my_tun
             .encapsulate_data_at(&packet, &mut dst, now)
-            .unwrap()
             .expect("a usable session exists after the handshake");
 
         // A WireGuard data message has exactly 32 bytes of overhead (no padding).
