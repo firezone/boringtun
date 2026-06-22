@@ -13,6 +13,9 @@ env:
   RUSTFLAGS: "-Dwarnings"
   RUSTDOCFLAGS: "-D warnings"
 
+permissions:
+  contents: read
+
 jobs:
   test-windows:
     runs-on: windows-latest
