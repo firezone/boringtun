@@ -17,6 +17,7 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
+#[cfg(feature = "packet-queue")]
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -40,6 +41,7 @@ const IPV6_IP_SZ: usize = 16;
 
 const IP_LEN_SZ: usize = 2;
 
+#[cfg(feature = "packet-queue")]
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 ///
@@ -70,6 +72,7 @@ pub struct Tunn {
     /// Index of most recently used session
     current: Index,
     /// Queue to store blocked packets
+    #[cfg(feature = "packet-queue")]
     packet_queue: VecDeque<Vec<u8>>,
     /// Keeps tabs on the expiring timers
     timers: timers::Timers,
@@ -253,6 +256,7 @@ impl Tunn {
             tx_bytes: Default::default(),
             rx_bytes: Default::default(),
 
+            #[cfg(feature = "packet-queue")]
             packet_queue: VecDeque::new(),
             timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), rng_seed, now),
 
@@ -330,6 +334,7 @@ impl Tunn {
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    #[cfg(feature = "packet-queue")]
     #[deprecated(note = "Prefer `Tunn::encapsulate_at` to avoid time-impurity")]
     pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
         self.encapsulate_at(src, dst, Instant::now())
@@ -338,9 +343,14 @@ impl Tunn {
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
     ///
+    /// On a packet for which there is no usable session yet, the packet is queued internally and a
+    /// handshake is initiated. Requires the `packet-queue` feature; without it, use the
+    /// side-effect-free [`Tunn::encapsulate_data_at`] and drive handshakes from the caller.
+    ///
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    #[cfg(feature = "packet-queue")]
     pub fn encapsulate_at<'a>(
         &mut self,
         src: &[u8],
@@ -421,8 +431,10 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> TunnResult<'a> {
+        // A repeated call is signalled by an empty datagram and drains the next queued packet.
+        // This only exists when the internal packet queue is compiled in.
+        #[cfg(feature = "packet-queue")]
         if datagram.is_empty() {
-            // Indicates a repeated call
             return self.send_queued_packet(dst, now);
         }
 
@@ -675,6 +687,7 @@ impl Tunn {
     }
 
     /// Get a packet from the queue, and try to encapsulate it
+    #[cfg(feature = "packet-queue")]
     fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8], now: Instant) -> TunnResult<'a> {
         if let Some(packet) = self.dequeue_packet() {
             match self.encapsulate_at(&packet, dst, now) {
@@ -689,6 +702,7 @@ impl Tunn {
     }
 
     /// Push packet to the back of the queue
+    #[cfg(feature = "packet-queue")]
     fn queue_packet(&mut self, packet: &[u8]) {
         if self.packet_queue.len() < MAX_QUEUE_DEPTH {
             // Drop if too many are already in queue
@@ -697,6 +711,7 @@ impl Tunn {
     }
 
     /// Push packet to the front of the queue
+    #[cfg(feature = "packet-queue")]
     fn requeue_packet(&mut self, packet: Vec<u8>) {
         if self.packet_queue.len() < MAX_QUEUE_DEPTH {
             // Drop if too many are already in queue
@@ -704,6 +719,7 @@ impl Tunn {
         }
     }
 
+    #[cfg(feature = "packet-queue")]
     fn dequeue_packet(&mut self) -> Option<Vec<u8>> {
         self.packet_queue.pop_front()
     }
@@ -877,6 +893,19 @@ mod tests {
         packet
     }
 
+    /// Encapsulate `src` over an already-established session, returning the WireGuard data message.
+    fn encapsulate_data<'a>(
+        tun: &mut Tunn,
+        src: &[u8],
+        dst: &'a mut [u8],
+        now: Instant,
+    ) -> &'a [u8] {
+        let len = tun
+            .encapsulate_data_at(src, dst, now)
+            .expect("a usable session to exist");
+        &dst[..len]
+    }
+
     fn update_timer_results_in_handshake(tun: &mut Tunn, now: &mut Instant) {
         for _ in 0..=MAX_JITTER.as_millis() {
             *now += Duration::from_millis(1);
@@ -936,6 +965,7 @@ mod tests {
         assert!(matches!(packet, Packet::PacketData(_)));
     }
 
+    #[cfg(feature = "packet-queue")]
     #[test]
     fn encapsulate_data_without_session_errors_and_has_no_side_effects() {
         let now = Instant::now();
@@ -1061,8 +1091,7 @@ mod tests {
             TunnResult::Done
         ));
         let sent_packet_buf = create_ipv4_udp_packet();
-        let data = my_tun.encapsulate_at(&sent_packet_buf, &mut my_dst, now);
-        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+        encapsulate_data(&mut my_tun, &sent_packet_buf, &mut my_dst, now);
 
         //Advance to timeout
         now += REKEY_AFTER_TIME;
@@ -1078,6 +1107,7 @@ mod tests {
     /// no new handshake is performed by the initiator.
     /// This can lead to a race-condition where the sender sends a packet on an almost expired session
     /// and by the time it is received, the session is expired.
+    #[cfg(feature = "packet-queue")]
     #[test]
     fn new_handshake_on_packet_for_session_that_is_about_to_expire() {
         let mut now = Instant::now();
@@ -1110,11 +1140,7 @@ mod tests {
         now += SHOULD_NOT_USE_AFTER_TIME + Duration::from_secs(1);
 
         let sent_packet_buf = create_ipv4_udp_packet();
-        let data = resonder_tun.encapsulate_at(&sent_packet_buf, &mut responder_tun, now);
-
-        let TunnResult::WriteToNetwork(data) = data else {
-            panic!("Expected `WriteToNetwork`")
-        };
+        let data = encapsulate_data(&mut resonder_tun, &sent_packet_buf, &mut responder_tun, now);
 
         assert!(matches!(
             Tunn::parse_incoming_packet(data).unwrap(),
@@ -1144,13 +1170,7 @@ mod tests {
 
         let sent_packet_buf = create_ipv4_udp_packet();
 
-        let data = my_tun.encapsulate_at(&sent_packet_buf, &mut my_dst, Instant::now());
-        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
-        let data = if let TunnResult::WriteToNetwork(sent) = data {
-            sent
-        } else {
-            unreachable!();
-        };
+        let data = encapsulate_data(&mut my_tun, &sent_packet_buf, &mut my_dst, Instant::now());
 
         let data = their_tun.decapsulate_at(None, data, &mut their_dst, Instant::now());
         assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
@@ -1187,9 +1207,7 @@ mod tests {
         {
             // Send the request.
 
-            let data = my_tun
-                .encapsulate_at(&sent_packet_buf, &mut my_dst, now)
-                .unwrap_network();
+            let data = encapsulate_data(&mut my_tun, &sent_packet_buf, &mut my_dst, now);
 
             now += Duration::from_secs(1);
 
@@ -1202,9 +1220,7 @@ mod tests {
         {
             // Send the response.
 
-            let data = their_tun
-                .encapsulate_at(&sent_packet_buf, &mut their_dst, now)
-                .unwrap_network();
+            let data = encapsulate_data(&mut their_tun, &sent_packet_buf, &mut their_dst, now);
 
             now += Duration::from_secs(1);
 
@@ -1261,13 +1277,9 @@ mod tests {
         now += Duration::from_secs(1);
 
         // Simulate an application-level handshake.
-        let req = my_tun
-            .encapsulate_at(&sent_packet_buf, &mut my_dst, now)
-            .unwrap_network();
+        let req = encapsulate_data(&mut my_tun, &sent_packet_buf, &mut my_dst, now);
         their_tun.decapsulate_at(None, req, &mut their_dst, now);
-        let res = their_tun
-            .encapsulate_at(&sent_packet_buf, &mut their_dst, now)
-            .unwrap_network();
+        let res = encapsulate_data(&mut their_tun, &sent_packet_buf, &mut their_dst, now);
         my_tun.decapsulate_at(None, res, &mut my_dst, now);
 
         // Idle the connection for 10s.
@@ -1277,7 +1289,7 @@ mod tests {
 
         // Start sending more traffic each second, this time without a reply.
         for _ in 0..10 {
-            my_tun.encapsulate_at(&sent_packet_buf, &mut my_dst, now);
+            encapsulate_data(&mut my_tun, &sent_packet_buf, &mut my_dst, now);
             now += Duration::from_secs(1);
 
             assert!(
@@ -1325,13 +1337,9 @@ mod tests {
         now += Duration::from_secs(1);
 
         // Simulate an application-level handshake.
-        let req = my_tun
-            .encapsulate_at(&sent_packet_buf, &mut my_dst, now)
-            .unwrap_network();
+        let req = encapsulate_data(&mut my_tun, &sent_packet_buf, &mut my_dst, now);
         their_tun.decapsulate_at(None, req, &mut their_dst, now);
-        let res = their_tun
-            .encapsulate_at(&sent_packet_buf, &mut their_dst, now)
-            .unwrap_network();
+        let res = encapsulate_data(&mut their_tun, &sent_packet_buf, &mut their_dst, now);
         my_tun.decapsulate_at(None, res, &mut my_dst, now);
 
         assert!(my_tun.sessions.iter().any(|s| s.is_some()));
