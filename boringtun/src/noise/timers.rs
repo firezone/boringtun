@@ -183,6 +183,7 @@ impl Tunn {
             *session = None;
         }
 
+        #[cfg(feature = "packet-queue")]
         self.packet_queue.clear();
 
         self.timers.clear(Instant::now());
@@ -387,7 +388,13 @@ impl Tunn {
         }
 
         if keepalive_required {
-            return self.encapsulate_at(&[], dst, now);
+            // A keepalive is only ever sent on an established session, so encrypt the empty packet
+            // in place; there is no need to queue it or start a handshake.
+            return match self.encapsulate_data_at(&[], dst, now) {
+                Ok(len) => TunnResult::WriteToNetwork(&mut dst[..len]),
+                Err(WireGuardError::NoCurrentSession) => TunnResult::Done,
+                Err(e) => TunnResult::Err(e),
+            };
         }
 
         TunnResult::Done

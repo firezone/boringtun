@@ -13,10 +13,14 @@ documentation = "https://docs.rs/boringtun/0.7.0/boringtun/"
 edition = "2021"
 
 [features]
-default = []
-device = ["socket2", "thiserror", "dep:nix", "dep:base64", "dep:hex", "dep:libc", "dep:ip_network", "dep:ip_network_table"]
+default = ["packet-queue"]
+device = ["packet-queue", "socket2", "thiserror", "dep:nix", "dep:base64", "dep:hex", "dep:libc", "dep:ip_network", "dep:ip_network_table"]
 jni-bindings = ["ffi-bindings", "jni"]
-ffi-bindings = ["tracing-subscriber", "dep:base64", "dep:hex", "dep:libc"]
+ffi-bindings = ["packet-queue", "tracing-subscriber", "dep:base64", "dep:hex", "dep:libc"]
+# Compile in the internal pre-session packet queue and the `encapsulate`/`encapsulate_at`
+# entry-points that drive it. Disable (e.g. `default-features = false`) to build a leaner
+# `Tunn` whose only encapsulation path is the side-effect-free `encapsulate_data_at`.
+packet-queue = []
 mock-instant = ["mock_instant"]                  # Deprecated.
 mock_instant = []                                # Deprecated.
 thiserror = ["dep:thiserror"]                    # Deprecated.
