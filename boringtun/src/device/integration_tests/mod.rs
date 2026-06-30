@@ -7,9 +7,9 @@
 mod tests {
     use crate::device::{DeviceConfig, DeviceHandle};
     use crate::x25519::{PublicKey, StaticSecret};
+    use aws_lc_rs::rand::{SecureRandom, SystemRandom};
     use base64::prelude::*;
     use hex::encode;
-    use ring::rand::{SecureRandom, SystemRandom};
     use std::fmt::Write as _;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};

@@ -1,7 +1,7 @@
+use aws_lc_rs::rand::{SecureRandom, SystemRandom};
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use ring::rand::{SecureRandom, SystemRandom};
 use typenum::U16;
 
 pub fn bench_blake2s_hash(c: &mut Criterion) {

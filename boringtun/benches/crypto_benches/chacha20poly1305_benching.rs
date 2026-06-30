@@ -1,9 +1,9 @@
 use aead::{AeadInPlace, KeyInit};
+use aws_lc_rs::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use rand::Rng;
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 
-fn chacha20poly1305_ring(key_bytes: &[u8], buf: &mut [u8]) {
+fn chacha20poly1305_aws_lc_rs(key_bytes: &[u8], buf: &mut [u8]) {
     let len = buf.len();
     let n = len - 16;
 
@@ -43,7 +43,7 @@ pub fn bench_chacha20poly1305(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(size as u64));
 
         group.bench_with_input(
-            BenchmarkId::new("chacha20poly1305_ring", size),
+            BenchmarkId::new("chacha20poly1305_aws_lc_rs", size),
             &size,
             |b, i| {
                 let mut key = [0; 32];
@@ -54,7 +54,7 @@ pub fn bench_chacha20poly1305(c: &mut Criterion) {
                 rng.fill_bytes(&mut key);
                 rng.fill_bytes(&mut buf);
 
-                b.iter(|| chacha20poly1305_ring(&key, &mut buf));
+                b.iter(|| chacha20poly1305_aws_lc_rs(&key, &mut buf));
             },
         );
 

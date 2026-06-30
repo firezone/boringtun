@@ -14,13 +14,15 @@ pub fn bench_x25519_public_key(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("x25519_public_key_ring", |b| {
-        let rng = ring::rand::SystemRandom::new();
+    group.bench_function("x25519_public_key_aws_lc_rs", |b| {
+        let rng = aws_lc_rs::rand::SystemRandom::new();
 
         b.iter(|| {
-            let my_private_key =
-                ring::agreement::EphemeralPrivateKey::generate(&ring::agreement::X25519, &rng)
-                    .unwrap();
+            let my_private_key = aws_lc_rs::agreement::EphemeralPrivateKey::generate(
+                &aws_lc_rs::agreement::X25519,
+                &rng,
+            )
+            .unwrap();
             my_private_key.compute_public_key().unwrap()
         });
     });

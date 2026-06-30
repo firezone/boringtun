@@ -7,9 +7,9 @@ use super::{
     PacketData,
 };
 use crate::noise::errors::WireGuardError;
+use aws_lc_rs::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use parking_lot::Mutex;
 use portable_atomic::{AtomicU64, Ordering};
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::time::Instant;
 
 pub struct Session {
