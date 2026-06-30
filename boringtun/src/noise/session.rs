@@ -9,15 +9,30 @@ use super::{
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 use portable_atomic::{AtomicU64, Ordering};
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::time::Instant;
+
+use backend::{Opener, Sealer};
+
+// The data-path AEAD backend.
+//
+// The default `ring` backend copies the payload into the destination buffer and then
+// encrypts/decrypts it in place, because `ring` exposes no out-of-place AEAD API. The optional
+// `aws-lc-crypto` backend instead encrypts/decrypts straight from `src` into `dst` using AWS-LC's
+// scatter/gather AEAD (`EVP_AEAD_CTX_seal_scatter` / `EVP_AEAD_CTX_open_gather`), removing the copy
+// while keeping `ring`-class (BoringSSL-lineage) throughput.
+#[cfg(not(feature = "aws-lc-crypto"))]
+#[path = "session_ring.rs"]
+mod backend;
+#[cfg(feature = "aws-lc-crypto")]
+#[path = "session_awslc.rs"]
+mod backend;
 
 pub struct Session {
     established_at: Instant,
     pub(crate) receiving_index: Index,
     sending_index: Index,
-    receiver: LessSafeKey,
-    sender: LessSafeKey,
+    receiver: Opener,
+    sender: Sealer,
     sending_key_counter: AtomicU64,
     receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
 }
@@ -179,10 +194,8 @@ impl Session {
             established_at: now,
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: LessSafeKey::new(
-                UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
-            ),
-            sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
+            receiver: Opener::new(receiving_key),
+            sender: Sealer::new(sending_key),
             sending_key_counter: AtomicU64::new(0),
             receiving_key_counter: Mutex::new(Default::default()),
         }
@@ -251,18 +264,9 @@ impl Session {
         let n = {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
-            data[..src.len()].copy_from_slice(src);
-            self.sender
-                .seal_in_place_separate_tag(
-                    Nonce::assume_unique_for_key(nonce),
-                    Aad::from(&[]),
-                    &mut data[..src.len()],
-                )
-                .map(|tag| {
-                    data[src.len()..src.len() + AEAD_SIZE].copy_from_slice(tag.as_ref());
-                    src.len() + AEAD_SIZE
-                })
-                .unwrap()
+            let n = src.len() + AEAD_SIZE;
+            self.sender.seal(nonce, src, &mut data[..n]);
+            n
         };
 
         Ok(&mut dst[..DATA_OFFSET + n])
@@ -291,22 +295,17 @@ impl Session {
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(packet.counter)?;
 
-        let ret = {
+        let plaintext_len = {
             let mut nonce = [0u8; 12];
             nonce[4..12].copy_from_slice(&packet.counter.to_le_bytes());
-            dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
             self.receiver
-                .open_in_place(
-                    Nonce::assume_unique_for_key(nonce),
-                    Aad::from(&[]),
-                    &mut dst[..ct_len],
-                )
+                .open(nonce, packet.encrypted_encapsulated_packet, dst)
                 .map_err(|_| WireGuardError::InvalidAeadTag)?
         };
 
         // After decryption is done, check counter again, and mark as received
         self.receiving_counter_mark(packet.counter)?;
-        Ok(ret)
+        Ok(&mut dst[..plaintext_len])
     }
 
     /// Returns the estimated downstream packet loss for this session

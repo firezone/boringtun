@@ -1183,6 +1183,29 @@ mod tests {
     }
 
     #[test]
+    fn tampered_data_packet_is_rejected() {
+        let now = Instant::now();
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake(now);
+        let mut my_dst = [0u8; 1024];
+        let mut their_dst = [0u8; 1024];
+
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let data = encapsulate_data(&mut my_tun, &sent_packet_buf, &mut my_dst, now);
+
+        // Flip a bit in the ciphertext body (the 16-byte data header precedes it). The AEAD tag
+        // check must fail; with out-of-place decryption `their_dst` would hold unverified plaintext,
+        // which must never be surfaced.
+        let mut tampered = data.to_vec();
+        tampered[16] ^= 0x01;
+
+        let result = their_tun.decapsulate_at(None, &tampered, &mut their_dst, now);
+        assert!(matches!(
+            result,
+            TunnResult::Err(WireGuardError::InvalidAeadTag)
+        ));
+    }
+
+    #[test]
     fn silent_without_application_traffic_and_persistent_keepalive() {
         let _guard = tracing_subscriber::fmt()
             .with_test_writer()
