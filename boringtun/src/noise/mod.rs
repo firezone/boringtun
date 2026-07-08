@@ -328,6 +328,14 @@ impl Tunn {
         self.timers.set_keepalive_timeout(keepalive_timeout);
     }
 
+    /// Set the `REKEY_TIMEOUT`, i.e. the interval at which an unanswered
+    /// handshake initiation is retried.
+    ///
+    /// Defaults to 5s.
+    pub fn set_rekey_timeout(&mut self, rekey_timeout: Duration) {
+        self.timers.set_rekey_timeout(rekey_timeout);
+    }
+
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
     ///
