@@ -45,7 +45,9 @@ pub const COOKIE_REPLY_SIZE: usize = 64;
 /// (implementation-specific; the paper's reference window is 2000 packets).
 pub const REPLAY_WINDOW: u64 = 8192;
 
-/// Granularity at which [`Sim::advance`] polls `update_timers_at`.
+/// Minimum step [`Sim::advance`] takes when a timer's deadline lands on the
+/// current instant, so it can nudge past a strictly-after boundary and keep
+/// making progress. It also bounds how late an event may be observed.
 pub const TICK: Duration = Duration::from_millis(100);
 
 const BUF: usize = 4096;
@@ -363,12 +365,30 @@ impl Sim {
 
     // --- Driving the tunnels ---
 
-    /// Advance the virtual clock, polling `update_timers_at` on both peers
-    /// every [`TICK`] and routing whatever they emit.
+    /// Advance the virtual clock, driving both peers purely by the instants they
+    /// announce via `next_timer_update` and routing whatever they emit.
+    ///
+    /// Rather than polling on a fixed interval, we jump straight to the earliest
+    /// instant either peer asked to be called back at. This asserts that
+    /// `next_timer_update` is *complete*: a caller that only ever polls at the
+    /// announced instants observes exactly the same behaviour as one polling
+    /// once a second. The [`TICK`] nudge below is the sole safety net for timers
+    /// whose deadline is reported inclusively but only fires strictly afterwards
+    /// (session expiry), and guarantees forward progress.
     pub fn advance(&mut self, duration: Duration) {
         let end = self.now + duration;
         while self.now < end {
-            self.now = std::cmp::min(self.now + TICK, end);
+            let next = [Peer::A, Peer::B]
+                .into_iter()
+                .filter_map(|peer| self.tunn(peer).next_timer_update())
+                .map(|(at, _reason)| at)
+                .min()
+                // Never move backwards and always make progress, even when a
+                // deadline is reported for the current instant.
+                .map(|at| at.max(self.now + TICK))
+                .unwrap_or(end);
+
+            self.now = std::cmp::min(next, end);
             self.poll(Peer::A);
             self.poll(Peer::B);
         }
