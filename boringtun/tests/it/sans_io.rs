@@ -4,7 +4,7 @@
 
 use crate::harness::{
     classify, ipv4_packet, secs, Kind, Outcome as _, Peer::A, Peer::B, Sim, KEEPALIVE_SIZE,
-    KEEPALIVE_TIMEOUT, MAX_JITTER, REJECT_AFTER_TIME, REKEY_TIMEOUT,
+    KEEPALIVE_TIMEOUT, MAX_JITTER, REJECT_AFTER_TIME, REKEY_AFTER_TIME, REKEY_TIMEOUT,
 };
 use boringtun::noise::errors::WireGuardError;
 use boringtun::noise::TunnResult;
@@ -78,6 +78,31 @@ fn next_timer_update_predicts_the_passive_keepalive() {
         .next_timer_update()
         .expect("a session that still expires eventually");
     assert_eq!(reason, "next expired session");
+}
+
+/// `next_timer_update` must never announce an instant in the past. Timers are
+/// anchored to the session start, so sending on a session already older than
+/// `REKEY_AFTER_TIME` arms the rekey-on-send timer with a deadline that has
+/// already elapsed; the caller must still be handed a usable (not past) instant.
+#[test]
+fn next_timer_update_never_points_into_the_past() {
+    let mut sim = Sim::connected();
+
+    // Age the session past REKEY_AFTER_TIME. With no traffic, nothing rekeys, so
+    // the session is still alive and its start is now well over REKEY_AFTER_TIME
+    // in the past.
+    sim.advance(REKEY_AFTER_TIME + secs(1));
+
+    // Sending now arms the rekey-on-send timer, whose deadline (session start +
+    // REKEY_AFTER_TIME) is already behind us.
+    sim.send_ip(A, &ipv4_packet(b"traffic after a long silence"));
+
+    let (wake, _reason) = sim.tunn(A).next_timer_update().expect("a rekey is now due");
+    assert!(
+        wake >= sim.now,
+        "next_timer_update returned an instant {:?} before now",
+        sim.now.duration_since(wake),
+    );
 }
 
 /// Callers may poll arbitrarily rarely; a single call after a long gap must
