@@ -115,3 +115,37 @@ fn rate_limited_tunnel_recovers_once_load_subsides() {
     let response = sim.deliver(B, &init).expect_one_net();
     assert_eq!(classify(&response), Kind::Response);
 }
+
+/// The rate limiter resets its window lazily when a handshake is verified, so
+/// it recovers even if no timers are driven in the meantime. This is what lets
+/// an idle tunnel avoid waking up once a second just to reset the counter.
+#[test]
+fn rate_limiter_resets_without_driving_timers() {
+    let mut sim = Sim::new();
+
+    for _ in 0..10 {
+        let init = sim.force_handshake_initiation(A);
+        sim.deliver(B, &init).expect_one_net();
+        sim.now += std::time::Duration::from_millis(10);
+    }
+
+    let init = sim.force_handshake_initiation(A);
+    let reply = sim.deliver(B, &init).expect_one_net();
+    assert_eq!(
+        classify(&reply),
+        Kind::CookieReply,
+        "11th handshake within a second"
+    );
+
+    // Advance time *without* calling `update_timers_at`, so the only thing that
+    // can clear the window is the lazy reset on the next handshake verification.
+    sim.now += secs(2);
+
+    let init = sim.force_handshake_initiation(A);
+    let response = sim.deliver(B, &init).expect_one_net();
+    assert_eq!(
+        classify(&response),
+        Kind::Response,
+        "window reset on verify, no timer needed"
+    );
+}

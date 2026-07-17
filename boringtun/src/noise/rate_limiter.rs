@@ -204,6 +204,11 @@ impl RateLimiter {
                 return Err(TunnResult::Err(WireGuardError::InvalidMac));
             }
 
+            // Advance the per-second window before checking it. Resetting it
+            // lazily here, on use, means callers don't need a background timer
+            // ticking once a second just to keep the counter accurate.
+            self.reset_count_at(now);
+
             if self.is_under_load() {
                 let addr = match src_addr {
                     None => return Err(TunnResult::Err(WireGuardError::UnderLoad)),
