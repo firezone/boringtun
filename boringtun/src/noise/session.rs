@@ -7,8 +7,6 @@ use super::{
     PacketData,
 };
 use crate::noise::errors::WireGuardError;
-use parking_lot::Mutex;
-use portable_atomic::{AtomicU64, Ordering};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
 use std::time::Instant;
 
@@ -18,8 +16,8 @@ pub struct Session {
     sending_index: Index,
     receiver: LessSafeKey,
     sender: LessSafeKey,
-    sending_key_counter: AtomicU64,
-    receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
+    sending_key_counter: u64,
+    receiving_key_counter: ReceivingKeyCounterValidator,
 }
 
 impl std::fmt::Debug for Session {
@@ -183,8 +181,8 @@ impl Session {
                 UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
             ),
             sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
-            sending_key_counter: AtomicU64::new(0),
-            receiving_key_counter: Mutex::new(Default::default()),
+            sending_key_counter: 0,
+            receiving_key_counter: Default::default(),
         }
     }
 
@@ -206,16 +204,14 @@ impl Session {
 
     /// Returns true if receiving counter is good to use
     fn receiving_counter_quick_check(&self, counter: u64) -> Result<(), WireGuardError> {
-        let counter_validator = self.receiving_key_counter.lock();
-        counter_validator.will_accept(counter)
+        self.receiving_key_counter.will_accept(counter)
     }
 
     /// Returns true if receiving counter is good to use, and marks it as used {
-    fn receiving_counter_mark(&self, counter: u64) -> Result<(), WireGuardError> {
-        let mut counter_validator = self.receiving_key_counter.lock();
-        let ret = counter_validator.mark_did_receive(counter);
+    fn receiving_counter_mark(&mut self, counter: u64) -> Result<(), WireGuardError> {
+        let ret = self.receiving_key_counter.mark_did_receive(counter);
         if ret.is_ok() {
-            counter_validator.receive_cnt += 1;
+            self.receiving_key_counter.receive_cnt += 1;
         }
         ret
     }
@@ -224,7 +220,7 @@ impl Session {
     /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
     /// returns the size of the formatted packet
     pub(super) fn format_packet_data<'a>(
-        &self,
+        &mut self,
         src: &[u8],
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
@@ -237,7 +233,8 @@ impl Session {
             return Err(WireGuardError::DestinationBufferTooSmall);
         }
 
-        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed);
+        let sending_key_counter = self.sending_key_counter;
+        self.sending_key_counter += 1;
 
         let (message_type, rest) = dst.split_at_mut(4);
         let (receiver_index, rest) = rest.split_at_mut(4);
@@ -273,7 +270,7 @@ impl Session {
     ///       dst will always take less space than src
     /// return the size of the encapsulated packet on success
     pub(super) fn receive_packet_data<'a>(
-        &self,
+        &mut self,
         packet: PacketData,
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
@@ -311,7 +308,9 @@ impl Session {
 
     /// Returns the estimated downstream packet loss for this session
     pub(super) fn current_packet_cnt(&self) -> (u64, u64) {
-        let counter_validator = self.receiving_key_counter.lock();
-        (counter_validator.next, counter_validator.receive_cnt)
+        (
+            self.receiving_key_counter.next,
+            self.receiving_key_counter.receive_cnt,
+        )
     }
 }
