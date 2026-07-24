@@ -390,9 +390,10 @@ impl Tunn {
         dst: &mut [u8],
         now: Instant,
     ) -> Result<usize, WireGuardError> {
+        let is_responder = self.timers.is_responder();
         let Some(session) = self.sessions[self.current]
-            .as_ref()
-            .filter(|s| s.should_use_at(now) || self.timers.is_responder())
+            .as_mut()
+            .filter(|s| s.should_use_at(now) || is_responder)
         else {
             return Err(WireGuardError::NoCurrentSession);
         };
@@ -517,7 +518,7 @@ impl Tunn {
             "Received handshake_response"
         );
 
-        let session = self.handshake.receive_handshake_response(p, now)?;
+        let mut session = self.handshake.receive_handshake_response(p, now)?;
 
         let keepalive_packet = session.format_packet_data(&[], dst)?;
         // Store new session in ring buffer
@@ -585,7 +586,7 @@ impl Tunn {
 
         // Get the (probably) right session
         let decapsulated_packet = {
-            let session = self.sessions[remote_idx].as_ref();
+            let session = self.sessions[remote_idx].as_mut();
             let session = session.ok_or_else(|| {
                 tracing::trace!(%remote_idx, "No current session available");
                 WireGuardError::NoCurrentSession
