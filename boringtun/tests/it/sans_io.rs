@@ -176,3 +176,36 @@ fn encapsulate_data_at_has_no_side_effects_without_a_session() {
 
     assert!(sim.log.is_empty(), "no handshake may have been initiated");
 }
+
+/// Polling exactly at the announced instant must change something. A deadline
+/// the caller cannot action is a busy-loop: `next_timer_update` keeps handing
+/// back the same instant and `update_timers_at` keeps finding nothing to do.
+///
+/// The session expiry is the case that got this wrong: it was announced at
+/// `established_at + REJECT_AFTER_TIME` while the session was only discarded
+/// strictly *after* that instant, so the one instant the caller was told to
+/// poll was the one instant at which polling could not expire it.
+#[test]
+fn the_announced_session_expiry_is_actionable() {
+    let mut sim = Sim::connected();
+    let mut buf = [0u8; 256];
+
+    // Drain the earlier timers so the session expiry is the next deadline.
+    sim.advance(REJECT_AFTER_TIME - secs(1));
+    let now = sim.now;
+    let tunn = sim.tunn_mut(A);
+    let _ = tunn.update_timers_at(&mut buf, now);
+
+    let Some((wake, "next expired session")) = tunn.next_timer_update() else {
+        panic!("expected the session expiry to be the next deadline");
+    };
+
+    // Poll exactly when told to, then ask again.
+    let _ = tunn.update_timers_at(&mut buf, wake);
+
+    assert_ne!(
+        tunn.next_timer_update().map(|(instant, _)| instant),
+        Some(wake),
+        "polling at the announced instant left the same deadline outstanding"
+    );
+}

@@ -45,9 +45,9 @@ pub const COOKIE_REPLY_SIZE: usize = 64;
 /// (implementation-specific; the paper's reference window is 2000 packets).
 pub const REPLAY_WINDOW: u64 = 8192;
 
-/// Minimum step [`Sim::advance`] takes when a timer's deadline lands on the
-/// current instant, so it can nudge past a strictly-after boundary and keep
-/// making progress. It also bounds how late an event may be observed.
+/// Slack the timing assertions allow on either side of a deadline, covering the
+/// few polls a peer may take to act on one (scheduling a handshake at one
+/// instant, sending it at the next).
 pub const TICK: Duration = Duration::from_millis(100);
 
 const BUF: usize = 4096;
@@ -369,24 +369,42 @@ impl Sim {
     /// announce via `next_timer_update` and routing whatever they emit.
     ///
     /// Rather than polling on a fixed interval, we jump straight to the earliest
-    /// instant either peer asked to be called back at. This asserts that
-    /// `next_timer_update` is *complete*: a caller that only ever polls at the
-    /// announced instants observes exactly the same behaviour as one polling
-    /// once a second. The [`TICK`] nudge below is the sole safety net for timers
-    /// whose deadline is reported inclusively but only fires strictly afterwards
-    /// (session expiry), and guarantees forward progress.
+    /// instant either peer asked to be called back at. That asserts two things
+    /// about `next_timer_update` on every test that advances time.
+    ///
+    /// It is *complete*: a caller that only ever polls at the announced instants
+    /// observes exactly the same behaviour as one polling once a second.
+    ///
+    /// Every instant it announces is also *actionable*: polling at one clears
+    /// it. A deadline that survived being polled would be handed straight back
+    /// here and stall the loop, which the assertion below reports.
     pub fn advance(&mut self, duration: Duration) {
         let end = self.now + duration;
+        let mut polls_at_now = 0;
+
         while self.now < end {
             let next = [Peer::A, Peer::B]
                 .into_iter()
                 .filter_map(|peer| self.tunn(peer).next_timer_update())
                 .map(|(at, _reason)| at)
                 .min()
-                // Never move backwards and always make progress, even when a
-                // deadline is reported for the current instant.
-                .map(|at| at.max(self.now + TICK))
+                // Never move backwards: a deadline may have elapsed already.
+                .map(|at| at.max(self.now))
                 .unwrap_or(end);
+
+            // Landing on the current instant is legitimate as long as each poll
+            // drains a timer that is due; the peers hold a handful between them,
+            // so only a long run of them means one never fires at all.
+            if next == self.now {
+                polls_at_now += 1;
+            } else {
+                polls_at_now = 0;
+            }
+            assert!(
+                polls_at_now < 10,
+                "a deadline at {:?} is announced repeatedly but never fires",
+                self.now
+            );
 
             self.now = std::cmp::min(next, end);
             self.poll(Peer::A);
