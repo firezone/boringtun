@@ -195,7 +195,7 @@ impl Session {
     }
 
     pub(crate) fn expired_at(&self, time: Instant) -> bool {
-        time > self.established_at + REJECT_AFTER_TIME
+        time >= self.established_at + REJECT_AFTER_TIME
     }
 
     pub(crate) fn should_use_at(&self, time: Instant) -> bool {
