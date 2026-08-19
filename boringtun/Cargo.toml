@@ -29,7 +29,7 @@ jni = ["dep:jni"]                                # Deprecated.
 socket2 = ["dep:socket2"]                        # Deprecated.
 
 [dependencies]
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 hex = { version = "0.4", optional = true }
 libc = { version = "0.2", optional = true }
 parking_lot = "0.12"
