@@ -394,3 +394,47 @@ fn keepalive_does_not_outlive_the_session_it_needs() {
 
     sim.advance(secs(5));
 }
+
+/// A responder adopts a new session only once traffic arrives on it, so
+/// handshakes whose follow-up traffic is lost leave `current` naming an older
+/// generation. The ring holds `N_SESSIONS` entries, so a run of them reuses the
+/// slot `current` names, and expiring whatever took that slot over leaves the
+/// responder unable to send while a perfectly good session is live.
+#[test]
+fn responder_can_send_after_the_session_ring_wraps() {
+    let mut sim = Sim::connected();
+
+    // Rotate the ring all the way round. The keepalive the initiator sends after
+    // each handshake is what would move the responder onto the new session, so
+    // drop it, as a lossy link would.
+    for _ in 0..8 {
+        // Handshakes carry a timestamp and are rejected as replays otherwise.
+        sim.suspend(secs(1));
+
+        let init = sim.force_handshake_initiation(A);
+        let response = sim.deliver(B, &init).expect_one_net();
+        let _lost = sim.deliver(A, &response).expect_one_net();
+    }
+
+    // One more, late enough that it is still far from expiry at the end.
+    sim.suspend(REJECT_AFTER_TIME - secs(10));
+    let init = sim.force_handshake_initiation(A);
+    let response = sim.deliver(B, &init).expect_one_net();
+    let _lost = sim.deliver(A, &response).expect_one_net();
+
+    // Let the older generations expire. Nothing may reach the peers meanwhile,
+    // or the responder would adopt the newest session after all.
+    sim.cut_link();
+    sim.advance(secs(20));
+    sim.heal_link();
+
+    // The newest session is 20s old against an expiry of 180s, and receiving on
+    // it would repair `current`, so ask the responder to send without giving it
+    // anything first.
+    let sent = sim.try_encapsulate(B, &ipv4_packet(b"hello"));
+    assert!(
+        sent.is_ok(),
+        "responder handshaked 20s ago but cannot send: {:?}",
+        sent.unwrap_err()
+    );
+}
