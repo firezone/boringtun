@@ -284,12 +284,6 @@ impl Tunn {
                     "SESSION_EXPIRED(REJECT_AFTER_TIME)"
                 );
                 *maybe_session = None;
-
-                if is_current {
-                    // A passive keepalive is encrypted on the current session, so its
-                    // deadline cannot outlive one: nothing would ever clear it again.
-                    self.timers.last_data_received_without_reply = None;
-                }
             }
         }
     }
@@ -453,6 +447,9 @@ impl Tunn {
                     .is_some_and(|deadline| now >= deadline)
                 {
                     tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
+                    // Consume the deadline now; the send below may fail and nothing else
+                    // would clear it.
+                    self.timers.last_data_received_without_reply = None;
                     keepalive_required = true;
                 }
 
