@@ -376,3 +376,21 @@ fn previous_session_remains_usable_during_rekey_transition() {
     );
     sim.deliver(A, &new_data).expect_one_ip();
 }
+
+/// A session can expire while we still owe the peer a passive keepalive, and
+/// there is then nothing left to encrypt that keepalive with. Its deadline has
+/// to go with the session, or every poll re-reads it as due and the caller is
+/// told to come back immediately, forever.
+#[test]
+fn keepalive_does_not_outlive_the_session_it_needs() {
+    let mut sim = Sim::connected();
+
+    // B receives data, so it owes A a keepalive in KEEPALIVE_TIMEOUT.
+    sim.send_ip(A, &ipv4_packet(b"ping"));
+
+    // With the link down, nothing re-establishes the session B would need.
+    sim.cut_link();
+    sim.suspend(REJECT_AFTER_TIME + secs(30));
+
+    sim.advance(secs(5));
+}

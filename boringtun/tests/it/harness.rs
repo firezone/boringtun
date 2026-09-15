@@ -378,6 +378,14 @@ impl Sim {
     /// Every instant it announces is also *actionable*: polling at one clears
     /// it. A deadline that survived being polled would be handed straight back
     /// here and stall the loop, which the assertion below reports.
+    /// Advance time without polling either peer, as when the host suspends.
+    ///
+    /// Every deadline inside the window goes unserviced; the next poll meets
+    /// them all at once.
+    pub fn suspend(&mut self, duration: Duration) {
+        self.now += duration;
+    }
+
     pub fn advance(&mut self, duration: Duration) {
         let end = self.now + duration;
         let mut polls_at_now = 0;
