@@ -4,7 +4,7 @@
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 use std::iter;
-use std::ops::{ControlFlow, Index, IndexMut};
+use std::ops::{Index, IndexMut};
 
 use rand::RngExt;
 use rand::{rngs::StdRng, SeedableRng};
@@ -276,11 +276,11 @@ impl Tunn {
 
     /// Discards every session past [`REJECT_AFTER_TIME`].
     ///
-    /// Breaks if the current session was among them and had carried data, because
+    /// Fails if the current session was among them and had carried data, because
     /// the re-key that data made due never landed.
-    fn expire_sessions(&mut self, now: Instant) -> ControlFlow<()> {
+    fn expire_sessions(&mut self, now: Instant) -> Result<(), WireGuardError> {
         let carried_data = self.timers.current_session_carried_data();
-        let mut flow = ControlFlow::Continue(());
+        let mut result = Ok(());
 
         for maybe_session in self.sessions.iter_mut() {
             let Some(session) = maybe_session else {
@@ -298,12 +298,12 @@ impl Tunn {
                 *maybe_session = None;
 
                 if is_current && carried_data {
-                    flow = ControlFlow::Break(());
+                    result = Err(WireGuardError::ConnectionExpired);
                 }
             }
         }
 
-        flow
+        result
     }
 
     /// The earliest [`Instant`] at which one of our sessions expires.
@@ -365,11 +365,11 @@ impl Tunn {
         // discards it at the same moment we do. A session that carried data was due a
         // re-key at REKEY_AFTER_TIME, so reaching its expiry means that re-key never
         // landed and there is no shared state left to reach.
-        if self.expire_sessions(now).is_break() {
+        if let Err(e) = self.expire_sessions(now) {
             tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME)");
             self.handshake.set_expired();
             self.clear_all(now);
-            return TunnResult::Err(WireGuardError::ConnectionExpired);
+            return TunnResult::Err(e);
         }
 
         // In case our session expired, create a new one iff we initiated the previous one.
