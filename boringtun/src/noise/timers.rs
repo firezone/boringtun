@@ -4,7 +4,7 @@
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 use std::iter;
-use std::ops::{Index, IndexMut};
+use std::ops::{ControlFlow, Index, IndexMut};
 
 use rand::RngExt;
 use rand::{rngs::StdRng, SeedableRng};
@@ -269,10 +269,12 @@ impl Tunn {
         self.timers.clear(now);
     }
 
-    /// Discards every session past [`REJECT_AFTER_TIME`], reporting whether the
-    /// current one was among them.
-    fn expire_sessions(&mut self, now: Instant) -> bool {
-        let mut current_expired = false;
+    /// Discards every session past [`REJECT_AFTER_TIME`].
+    ///
+    /// Breaks if the current session was among them, because the tunnel cannot
+    /// carry on without it.
+    fn expire_sessions(&mut self, now: Instant) -> ControlFlow<()> {
+        let mut flow = ControlFlow::Continue(());
 
         for maybe_session in self.sessions.iter_mut() {
             let Some(session) = maybe_session else {
@@ -288,11 +290,14 @@ impl Tunn {
                     "SESSION_EXPIRED(REJECT_AFTER_TIME)"
                 );
                 *maybe_session = None;
-                current_expired |= is_current;
+
+                if is_current {
+                    flow = ControlFlow::Break(());
+                }
             }
         }
 
-        current_expired
+        flow
     }
 
     /// The earliest [`Instant`] at which one of our sessions expires.
@@ -354,7 +359,7 @@ impl Tunn {
         // remote discards it at the same moment we do. Getting here means the re-key
         // that should have replaced it never landed, leaving no shared state to
         // recover: the connection goes with the session.
-        if self.expire_sessions(now) {
+        if self.expire_sessions(now).is_break() {
             tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME)");
             self.handshake.set_expired();
             self.clear_all(now);
