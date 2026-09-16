@@ -226,44 +226,43 @@ fn persistent_keepalive_fires_on_its_interval() {
 }
 
 /// §6.1: sessions are discarded `REJECT_AFTER_TIME` after they were
-/// established. The responder simply goes silent.
+/// established. Both peers time the same session from the same handshake, so
+/// they lose it together and neither is left with state the other could still
+/// re-key onto. The tunnel goes with the session.
 #[test]
-fn responder_discards_the_session_after_reject_after_time() {
+fn tunnel_expires_with_its_current_session() {
     let mut sim = Sim::connected();
     sim.assert_connectivity();
     sim.advance(secs(30)); // Let passive keepalives settle.
-    sim.cut_link(); // Keep the initiator's automatic renewal from re-establishing.
 
     sim.advance(REJECT_AFTER_TIME - secs(20));
 
-    assert!(!sim.is_established(B));
+    for peer in [A, B] {
+        assert!(!sim.is_established(peer));
+        assert!(sim.tunn(peer).is_expired());
+        assert!(sim
+            .errors(peer)
+            .iter()
+            .any(|e| matches!(e, WireGuardError::ConnectionExpired)));
+    }
     assert!(matches!(
         sim.try_encapsulate(B, &ipv4_packet(b"too late")),
         Err(WireGuardError::NoCurrentSession)
     ));
-    assert!(
-        sim.errors(B).is_empty(),
-        "expiry of a session is not an error"
-    );
 }
 
-/// When the expired session was initiated by us, boringtun starts a new
-/// handshake right away instead of waiting for the next outgoing packet.
+/// Re-keying onto a session the peer has already discarded can only fail, and
+/// the retries would run for `REKEY_ATTEMPT_TIME` before saying so.
 #[test]
-fn initiator_renews_an_expired_session_automatically() {
+fn expired_session_does_not_start_a_doomed_rekey() {
     let mut sim = Sim::connected();
     sim.assert_connectivity();
     sim.advance(secs(30));
     sim.clear_log();
 
-    sim.advance(REJECT_AFTER_TIME - secs(20));
+    sim.advance(REJECT_AFTER_TIME + REKEY_ATTEMPT_TIME);
 
-    let inits = sim.sent_at(A, Kind::Init);
-    assert_eq!(inits.len(), 1);
-    assert_fires_at(inits[0], REJECT_AFTER_TIME);
-    assert!(sim.is_established(A));
-    assert!(sim.is_established(B));
-    sim.assert_connectivity();
+    assert!(sim.sent_at(A, Kind::Init).is_empty());
 }
 
 /// §6.1: after `3 * REJECT_AFTER_TIME` without a successful handshake, all
