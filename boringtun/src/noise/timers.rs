@@ -121,6 +121,14 @@ impl Timers {
         self[TimeLastHandshakeStarted] + self.rekey_attempt_time
     }
 
+    /// Whether data has been sent on the current session since it was established.
+    ///
+    /// Only such a session is ever due a re-key: one that has carried nothing ages
+    /// out without [`Timers::rekey_after_time_on_send`] ever arming.
+    pub(crate) fn current_session_carried_data(&self) -> bool {
+        self[TimeLastDataPacketSent] > self[TimeSessionEstablished]
+    }
+
     /// As the initiator, we start a new handshake `REKEY_AFTER_TIME` after
     /// establishing a session on which we have since sent data.
     pub(crate) fn rekey_after_time_on_send(&self) -> Option<Instant> {
@@ -129,14 +137,11 @@ impl Timers {
             return None;
         }
 
-        let session_established = self[TimeSessionEstablished];
-
-        if session_established >= self[TimeLastDataPacketSent] {
-            // If we haven't sent any data yet, this timer doesn't matter.
+        if !self.current_session_carried_data() {
             return None;
         }
 
-        Some(session_established + REKEY_AFTER_TIME)
+        Some(self[TimeSessionEstablished] + REKEY_AFTER_TIME)
     }
 
     /// As the initiator, we start a new handshake once a session on which we
@@ -269,7 +274,14 @@ impl Tunn {
         self.timers.clear(now);
     }
 
-    fn expire_sessions(&mut self, now: Instant) {
+    /// Discards every session past [`REJECT_AFTER_TIME`].
+    ///
+    /// Fails if the current session was among them and had carried data, because
+    /// the re-key that data made due never landed.
+    fn expire_sessions(&mut self, now: Instant) -> Result<(), WireGuardError> {
+        let carried_data = self.timers.current_session_carried_data();
+        let mut result = Ok(());
+
         for maybe_session in self.sessions.iter_mut() {
             let Some(session) = maybe_session else {
                 continue;
@@ -284,8 +296,14 @@ impl Tunn {
                     "SESSION_EXPIRED(REJECT_AFTER_TIME)"
                 );
                 *maybe_session = None;
+
+                if is_current && carried_data {
+                    result = Err(WireGuardError::ConnectionExpired);
+                }
             }
         }
+
+        result
     }
 
     /// The earliest [`Instant`] at which one of our sessions expires.
@@ -343,7 +361,16 @@ impl Tunn {
             self.rate_limiter.reset_count_at(now);
         }
 
-        self.expire_sessions(now);
+        // Both peers derive a session's lifetime from the same handshake, so the remote
+        // discards it at the same moment we do. A session that carried data was due a
+        // re-key at REKEY_AFTER_TIME, so reaching its expiry means that re-key never
+        // landed and there is no shared state left to reach.
+        if let Err(e) = self.expire_sessions(now) {
+            tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME)");
+            self.handshake.set_expired();
+            self.clear_all(now);
+            return TunnResult::Err(e);
+        }
 
         // In case our session expired, create a new one iff we initiated the previous one.
         if self.sessions[self.current].is_none()
