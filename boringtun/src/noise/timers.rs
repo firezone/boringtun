@@ -4,7 +4,7 @@
 use super::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 use std::iter;
-use std::ops::{Index, IndexMut};
+use std::ops::{ControlFlow, Index, IndexMut};
 
 use rand::RngExt;
 use rand::{rngs::StdRng, SeedableRng};
@@ -269,7 +269,13 @@ impl Tunn {
         self.timers.clear(now);
     }
 
-    fn expire_sessions(&mut self, now: Instant) {
+    /// Discards every session past [`REJECT_AFTER_TIME`].
+    ///
+    /// Breaks if the current session was among them, because the tunnel cannot
+    /// carry on without it.
+    fn expire_sessions(&mut self, now: Instant) -> ControlFlow<()> {
+        let mut flow = ControlFlow::Continue(());
+
         for maybe_session in self.sessions.iter_mut() {
             let Some(session) = maybe_session else {
                 continue;
@@ -284,8 +290,14 @@ impl Tunn {
                     "SESSION_EXPIRED(REJECT_AFTER_TIME)"
                 );
                 *maybe_session = None;
+
+                if is_current {
+                    flow = ControlFlow::Break(());
+                }
             }
         }
+
+        flow
     }
 
     /// The earliest [`Instant`] at which one of our sessions expires.
@@ -343,9 +355,18 @@ impl Tunn {
             self.rate_limiter.reset_count_at(now);
         }
 
-        self.expire_sessions(now);
+        // Both peers derive the session's lifetime from the same handshake, so the
+        // remote discards it at the same moment we do. Getting here means the re-key
+        // that should have replaced it never landed, leaving no shared state to
+        // recover: the connection goes with the session.
+        if self.expire_sessions(now).is_break() {
+            tracing::debug!("CONNECTION_EXPIRED(REJECT_AFTER_TIME)");
+            self.handshake.set_expired();
+            self.clear_all(now);
+            return TunnResult::Err(WireGuardError::ConnectionExpired);
+        }
 
-        // In case our session expired, create a new one iff we initiated the previous one.
+        // Sessions can also go without expiring, e.g. when the static key is rotated.
         if self.sessions[self.current].is_none()
             && !self.handshake.is_in_progress()
             && self.timers.is_initiator()
