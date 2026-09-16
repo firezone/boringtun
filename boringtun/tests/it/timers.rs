@@ -266,6 +266,52 @@ fn initiator_renews_an_expired_session_automatically() {
     sim.assert_connectivity();
 }
 
+/// A session that carried data was due a re-key at `REKEY_AFTER_TIME`. Both peers
+/// discard the session at the same instant, so surviving to `REJECT_AFTER_TIME`
+/// means that re-key never landed and there is nothing left for a handshake to
+/// reach. Waiting out `REKEY_ATTEMPT_TIME` on top would only confirm it.
+#[test]
+fn tunnel_expires_when_a_used_session_expires() {
+    let mut sim = Sim::connected();
+    sim.advance(secs(1));
+    sim.assert_connectivity();
+    sim.cut_link();
+
+    sim.advance(REJECT_AFTER_TIME);
+
+    for peer in [A, B] {
+        assert!(sim.tunn(peer).is_expired());
+        assert!(sim
+            .errors(peer)
+            .iter()
+            .any(|e| matches!(e, WireGuardError::ConnectionExpired)));
+    }
+    assert!(
+        sim.sent_at(A, Kind::Init)
+            .iter()
+            .all(|at| *at < REJECT_AFTER_TIME),
+        "retries stop once the session they were replacing is gone"
+    );
+}
+
+/// A re-key hands over a session that has carried nothing yet, so traffic stopping
+/// right after one leaves a session that ages out without ever being due a re-key
+/// of its own. That says nothing about the peer, and the tunnel has to survive it.
+#[test]
+fn tunnel_survives_a_session_a_rekey_left_unused() {
+    let mut sim = Sim::connected();
+    sim.advance(secs(1));
+    sim.assert_connectivity();
+
+    sim.advance(REKEY_AFTER_TIME);
+    sim.advance(REJECT_AFTER_TIME + secs(10));
+
+    for peer in [A, B] {
+        assert!(!sim.tunn(peer).is_expired());
+    }
+    sim.assert_connectivity();
+}
+
 /// §6.1: after `3 * REJECT_AFTER_TIME` without a successful handshake, all
 /// remaining state is wiped and the tunnel reports itself expired.
 #[test]
