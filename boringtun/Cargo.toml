@@ -63,6 +63,7 @@ nix = { version = "0.31", optional = true, default-features = false, features = 
 
 [dev-dependencies]
 etherparse = "0.21"
+rand = "0.10"
 tracing-subscriber = "0.3"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 

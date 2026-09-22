@@ -11,7 +11,7 @@ use chacha20poly1305::{Key, XChaCha20Poly1305};
 use constant_time_eq::constant_time_eq;
 use parking_lot::Mutex;
 use portable_atomic::{AtomicU64, Ordering};
-use rand::Rng;
+use rand::CryptoRng;
 
 const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can optimize out the division
 const COOKIE_SIZE: usize = 16;
@@ -49,28 +49,24 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    #[deprecated(note = "Prefer `RateLimiter::new_at` to avoid time-impurity")]
+    #[deprecated(note = "Prefer `RateLimiter::new_at` to avoid time- and rng-impurity")]
     pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
-        let mut secret_key = [0u8; 16];
-        rand::rng().fill_bytes(&mut secret_key);
-        RateLimiter {
-            nonce_key: Self::rand_bytes(),
-            secret_key,
-            start_time: Instant::now(),
-            nonce_ctr: AtomicU64::new(0),
-            mac1_key: b2s_hash(LABEL_MAC1, public_key.as_bytes()),
-            cookie_key: b2s_hash(LABEL_COOKIE, public_key.as_bytes()).into(),
-            limit,
-            count: AtomicU64::new(0),
-            last_reset: Mutex::new(Instant::now()),
-        }
+        Self::new_at(public_key, limit, Instant::now(), &mut rand::rng())
     }
 
-    pub fn new_at(public_key: &crate::x25519::PublicKey, limit: u64, now: Instant) -> Self {
+    pub fn new_at(
+        public_key: &crate::x25519::PublicKey,
+        limit: u64,
+        now: Instant,
+        rng: &mut impl CryptoRng,
+    ) -> Self {
+        let mut nonce_key = [0u8; 32];
         let mut secret_key = [0u8; 16];
-        rand::rng().fill_bytes(&mut secret_key);
+        rng.fill_bytes(&mut nonce_key);
+        rng.fill_bytes(&mut secret_key);
+
         RateLimiter {
-            nonce_key: Self::rand_bytes(),
+            nonce_key,
             secret_key,
             start_time: now,
             nonce_ctr: AtomicU64::new(0),
@@ -80,12 +76,6 @@ impl RateLimiter {
             count: AtomicU64::new(0),
             last_reset: Mutex::new(now),
         }
-    }
-
-    fn rand_bytes() -> [u8; 32] {
-        let mut key = [0u8; 32];
-        rand::rng().fill_bytes(&mut key);
-        key
     }
 
     /// Reset packet count (ideally should be called with a period of 1 second)

@@ -265,6 +265,7 @@ impl Tunn {
                     &static_public,
                     PEER_HANDSHAKE_RATE_LIMIT,
                     now,
+                    &mut rand::rng(),
                 ))
             }),
         }
@@ -305,6 +306,7 @@ impl Tunn {
                 &static_public,
                 PEER_HANDSHAKE_RATE_LIMIT,
                 now,
+                &mut rand::rng(),
             ))
         });
         self.handshake

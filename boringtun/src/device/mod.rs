@@ -470,6 +470,7 @@ impl Device {
             &public_key,
             HANDSHAKE_RATE_LIMIT,
             Instant::now(),
+            &mut rand::rng(),
         ));
 
         for peer in self.peers.values_mut() {
