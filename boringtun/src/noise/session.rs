@@ -7,8 +7,23 @@ use super::{
     PacketData,
 };
 use crate::noise::errors::WireGuardError;
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
+use ring::aead::{Aad, Algorithm, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, CHACHA20_POLY1305};
+use std::sync::LazyLock;
 use std::time::Instant;
+
+/// Transport data cipher, selected once via `BORINGTUN_CIPHER` (experiment only).
+///
+/// `aes-256-gcm` selects AES-256-GCM, anything else keeps ChaCha20-Poly1305.
+static TRANSPORT_CIPHER: LazyLock<&'static Algorithm> = LazyLock::new(|| {
+    let (name, algorithm) = match std::env::var("BORINGTUN_CIPHER").as_deref() {
+        Ok("aes-256-gcm") => ("aes-256-gcm", &AES_256_GCM),
+        _ => ("chacha20-poly1305", &CHACHA20_POLY1305),
+    };
+
+    tracing::info!(cipher = %name, "Selected WireGuard transport cipher");
+
+    algorithm
+});
 
 pub struct Session {
     established_at: Instant,
@@ -177,10 +192,8 @@ impl Session {
             established_at: now,
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: LessSafeKey::new(
-                UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
-            ),
-            sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
+            receiver: LessSafeKey::new(UnboundKey::new(*TRANSPORT_CIPHER, &receiving_key).unwrap()),
+            sender: LessSafeKey::new(UnboundKey::new(*TRANSPORT_CIPHER, &sending_key).unwrap()),
             sending_key_counter: 0,
             receiving_key_counter: Default::default(),
         }
