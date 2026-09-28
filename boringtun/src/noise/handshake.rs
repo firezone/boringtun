@@ -486,6 +486,10 @@ impl Handshake {
         self.cipher_suite = cipher_suite;
     }
 
+    pub(crate) fn cipher_suite(&self) -> CipherSuite {
+        self.cipher_suite
+    }
+
     pub(crate) fn remote_static_public(&self) -> x25519::PublicKey {
         self.params.peer_static_public
     }

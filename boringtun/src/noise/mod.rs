@@ -346,6 +346,10 @@ impl Tunn {
         self.handshake.set_cipher_suite(cipher_suite);
     }
 
+    pub fn cipher_suite(&self) -> CipherSuite {
+        self.handshake.cipher_suite()
+    }
+
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
     ///
