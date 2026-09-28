@@ -5,6 +5,7 @@
 //! API only, on a virtual clock (see [`harness`]). They are grounded in the
 //! WireGuard whitepaper (<https://www.wireguard.com/papers/wireguard.pdf>):
 //!
+//! - Cipher suites other than WireGuard's own (`cipher_suite`, `noise_interop`)
 //! - §5.3: cookies and DoS mitigation (`cookies`)
 //! - §5.4: protocol messages (`handshake`, `data`)
 //! - §5.4.6, §6.4: nonce-based replay protection (`replay`)
@@ -14,10 +15,12 @@
 //! `next_timer_update`, jittered handshake scheduling and the internal packet
 //! queue - is covered in `sans_io`.
 
+mod cipher_suite;
 mod cookies;
 mod data;
 mod handshake;
 mod harness;
+mod noise_interop;
 mod replay;
 mod sans_io;
 mod timers;

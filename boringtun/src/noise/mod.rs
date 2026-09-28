@@ -1,6 +1,7 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+mod cipher_suite;
 pub mod errors;
 pub mod handshake;
 pub mod rate_limiter;
@@ -9,6 +10,7 @@ mod index;
 mod session;
 mod timers;
 
+pub use cipher_suite::CipherSuite;
 pub use index::Index;
 
 use crate::noise::errors::WireGuardError;
@@ -336,6 +338,14 @@ impl Tunn {
         self.timers.set_rekey_timeout(rekey_timeout);
     }
 
+    /// Set the [`CipherSuite`] of future handshakes and the sessions they establish.
+    ///
+    /// Set it before the first handshake: the peer must use the same suite.
+    /// Defaults to [`CipherSuite::ChaChaPoly`].
+    pub fn set_cipher_suite(&mut self, cipher_suite: CipherSuite) {
+        self.handshake.set_cipher_suite(cipher_suite);
+    }
+
     /// Encapsulate a single packet from the tunnel interface.
     /// Returns TunnResult.
     ///
@@ -400,6 +410,14 @@ impl Tunn {
 
         // Send the packet using an established session
         let len = session.format_packet_data(src, dst)?.len();
+
+        if session.should_rekey()
+            && !self.handshake.is_in_progress()
+            && !self.timers.is_handshake_scheduled()
+        {
+            tracing::debug!("HANDSHAKE(REKEY_AFTER_MESSAGES)");
+            self.schedule_handshake(now);
+        }
 
         self.timer_tick(TimerName::TimeLastPacketSent, now);
         // Exclude Keepalive packets from timer update.

@@ -199,6 +199,10 @@ impl Timers {
         self.last_data_received_without_reply = None;
     }
 
+    pub(crate) fn is_handshake_scheduled(&self) -> bool {
+        self.send_handshake_at.is_some()
+    }
+
     pub(crate) fn set_rekey_attempt_time(&mut self, rekey_attempt_time: Duration) {
         self.rekey_attempt_time = rekey_attempt_time;
     }
@@ -494,18 +498,7 @@ impl Tunn {
         }
 
         if handshake_initiation_required {
-            let jitter = self
-                .timers
-                .jitter_rng
-                .random_range(Duration::ZERO..=MAX_JITTER);
-
-            let existing = self.timers.send_handshake_at.replace(now + jitter);
-            debug_assert!(
-                existing.is_none(),
-                "Should never override existing handshake"
-            );
-
-            tracing::debug!(?jitter, "Scheduling new handshake");
+            self.schedule_handshake(now);
 
             return TunnResult::Done;
         }
@@ -521,6 +514,21 @@ impl Tunn {
         }
 
         TunnResult::Done
+    }
+
+    pub(super) fn schedule_handshake(&mut self, now: Instant) {
+        let jitter = self
+            .timers
+            .jitter_rng
+            .random_range(Duration::ZERO..=MAX_JITTER);
+
+        let existing = self.timers.send_handshake_at.replace(now + jitter);
+        debug_assert!(
+            existing.is_none(),
+            "Should never override existing handshake"
+        );
+
+        tracing::debug!(?jitter, "Scheduling new handshake");
     }
 
     /// Returns the [`Instant`] at which [`Tunn::update_timers_at`] next needs to

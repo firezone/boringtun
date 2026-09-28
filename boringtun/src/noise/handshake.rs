@@ -1,6 +1,7 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use super::cipher_suite::CipherSuite;
 use super::index::Index;
 use super::timers::COOKIE_EXPIRATION_TIME;
 use super::{HandshakeInit, HandshakeResponse, PacketCookieReply};
@@ -12,7 +13,7 @@ use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use constant_time_eq::constant_time_eq;
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
+use ring::aead::{Aad, Algorithm, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
 use std::time::{Duration, Instant};
@@ -22,18 +23,6 @@ pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
 const KEY_LEN: usize = 32;
 const TIMESTAMP_LEN: usize = 12;
-
-// initiator.chaining_key = HASH(CONSTRUCTION)
-const INITIAL_CHAIN_KEY: [u8; KEY_LEN] = [
-    96, 226, 109, 174, 243, 39, 239, 192, 46, 195, 53, 226, 160, 37, 210, 208, 22, 235, 66, 6, 248,
-    114, 119, 245, 45, 56, 209, 152, 139, 120, 205, 54,
-];
-
-// initiator.chaining_hash = HASH(initiator.chaining_key || IDENTIFIER)
-const INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
-    34, 17, 179, 97, 8, 26, 197, 102, 105, 18, 67, 219, 69, 138, 213, 50, 45, 156, 108, 102, 34,
-    147, 232, 183, 14, 225, 156, 101, 186, 7, 158, 243,
-];
 
 #[inline]
 pub(crate) fn b2s_hash(data1: &[u8], data2: &[u8]) -> [u8; 32] {
@@ -87,22 +76,34 @@ pub(crate) fn b2s_mac_24(key: &[u8], data1: &[u8]) -> [u8; 24] {
 
 #[inline]
 /// This wrapper involves an extra copy and MAY BE SLOWER
-fn aead_chacha20_seal(ciphertext: &mut [u8], key: &[u8], counter: u64, data: &[u8], aad: &[u8]) {
-    let mut nonce: [u8; 12] = [0; 12];
-    nonce[4..12].copy_from_slice(&counter.to_le_bytes());
-
-    aead_chacha20_seal_inner(ciphertext, key, nonce, data, aad)
+fn aead_seal(
+    suite: CipherSuite,
+    ciphertext: &mut [u8],
+    key: &[u8],
+    counter: u64,
+    data: &[u8],
+    aad: &[u8],
+) {
+    aead_seal_inner(
+        suite.aead(),
+        ciphertext,
+        key,
+        suite.nonce(counter),
+        data,
+        aad,
+    )
 }
 
 #[inline]
-fn aead_chacha20_seal_inner(
+fn aead_seal_inner(
+    algorithm: &'static Algorithm,
     ciphertext: &mut [u8],
     key: &[u8],
     nonce: [u8; 12],
     data: &[u8],
     aad: &[u8],
 ) {
-    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).unwrap());
+    let key = LessSafeKey::new(UnboundKey::new(algorithm, key).unwrap());
 
     ciphertext[..data.len()].copy_from_slice(data);
 
@@ -119,30 +120,29 @@ fn aead_chacha20_seal_inner(
 
 #[inline]
 /// This wrapper involves an extra copy and MAY BE SLOWER
-fn aead_chacha20_open(
+fn aead_open(
+    suite: CipherSuite,
     buffer: &mut [u8],
     key: &[u8],
     counter: u64,
     data: &[u8],
     aad: &[u8],
 ) -> Result<(), WireGuardError> {
-    let mut nonce: [u8; 12] = [0; 12];
-    nonce[4..].copy_from_slice(&counter.to_le_bytes());
-
-    aead_chacha20_open_inner(buffer, key, nonce, data, aad)
+    aead_open_inner(suite.aead(), buffer, key, suite.nonce(counter), data, aad)
         .map_err(|_| WireGuardError::InvalidAeadTag)?;
     Ok(())
 }
 
 #[inline]
-fn aead_chacha20_open_inner(
+fn aead_open_inner(
+    algorithm: &'static Algorithm,
     buffer: &mut [u8],
     key: &[u8],
     nonce: [u8; 12],
     data: &[u8],
     aad: &[u8],
 ) -> Result<(), ring::error::Unspecified> {
-    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).unwrap());
+    let key = LessSafeKey::new(UnboundKey::new(algorithm, key).unwrap());
 
     let mut inner_buffer = data.to_owned();
 
@@ -316,6 +316,7 @@ pub struct Handshake {
     // TODO: make TimeStamper a singleton
     stamper: TimeStamper,
     pub(super) last_rtt: Option<u32>,
+    cipher_suite: CipherSuite,
 }
 
 #[derive(Default)]
@@ -337,19 +338,52 @@ pub struct HalfHandshake {
     pub peer_static_public: [u8; 32],
 }
 
+/// Decrypts the initiator's static public key from a handshake initiation.
+///
+/// Accepts initiations of every [`CipherSuite`]; whether it matches the suite configured for the
+/// peer is checked when its [`Tunn`](super::Tunn) processes the initiation.
 pub fn parse_handshake_anon(
     static_private: &x25519::StaticSecret,
     static_public: &x25519::PublicKey,
     packet: &HandshakeInit,
 ) -> Result<HalfHandshake, WireGuardError> {
     let peer_index = packet.sender_idx;
-    // initiator.chaining_key = HASH(CONSTRUCTION)
-    let mut chaining_key = INITIAL_CHAIN_KEY;
-    // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
-    let mut hash = INITIAL_CHAIN_HASH;
-    hash = b2s_hash(&hash, static_public.as_bytes());
     // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
     let peer_ephemeral_public = x25519::PublicKey::from(*packet.unencrypted_ephemeral);
+    let ephemeral_shared = static_private.diffie_hellman(&peer_ephemeral_public);
+
+    let peer_static_public = [CipherSuite::ChaChaPoly, CipherSuite::AesGcm]
+        .into_iter()
+        .find_map(|suite| {
+            decrypt_initiator_static(
+                suite,
+                static_public,
+                &peer_ephemeral_public,
+                &ephemeral_shared,
+                packet.encrypted_static,
+            )
+            .ok()
+        })
+        .ok_or(WireGuardError::InvalidAeadTag)?;
+
+    Ok(HalfHandshake {
+        peer_index,
+        peer_static_public,
+    })
+}
+
+fn decrypt_initiator_static(
+    suite: CipherSuite,
+    static_public: &x25519::PublicKey,
+    peer_ephemeral_public: &x25519::PublicKey,
+    ephemeral_shared: &x25519::SharedSecret,
+    encrypted_static: &[u8],
+) -> Result<[u8; KEY_LEN], WireGuardError> {
+    // initiator.chaining_key = HASH(CONSTRUCTION)
+    let mut chaining_key = suite.initial_chain_key();
+    // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
+    let mut hash = suite.initial_chain_hash();
+    hash = b2s_hash(&hash, static_public.as_bytes());
     // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
     hash = b2s_hash(&hash, peer_ephemeral_public.as_bytes());
     // temp = HMAC(initiator.chaining_key, msg.unencrypted_ephemeral)
@@ -359,7 +393,6 @@ pub fn parse_handshake_anon(
         &[0x01],
     );
     // temp = HMAC(initiator.chaining_key, DH(initiator.ephemeral_private, responder.static_public))
-    let ephemeral_shared = static_private.diffie_hellman(&peer_ephemeral_public);
     let temp = b2s_hmac(&chaining_key, &ephemeral_shared.to_bytes());
     // initiator.chaining_key = HMAC(temp, 0x1)
     chaining_key = b2s_hmac(&temp, &[0x01]);
@@ -368,18 +401,16 @@ pub fn parse_handshake_anon(
 
     let mut peer_static_public = [0u8; KEY_LEN];
     // msg.encrypted_static = AEAD(key, 0, initiator.static_public, initiator.hash)
-    aead_chacha20_open(
+    aead_open(
+        suite,
         &mut peer_static_public,
         &key,
         0,
-        packet.encrypted_static,
+        encrypted_static,
         &hash,
     )?;
 
-    Ok(HalfHandshake {
-        peer_index,
-        peer_static_public,
-    })
+    Ok(peer_static_public)
 }
 
 impl NoiseParams {
@@ -447,7 +478,12 @@ impl Handshake {
             stamper: TimeStamper::new(unix_instant, unix),
             cookies: Default::default(),
             last_rtt: None,
+            cipher_suite: CipherSuite::default(),
         }
+    }
+
+    pub(crate) fn set_cipher_suite(&mut self, cipher_suite: CipherSuite) {
+        self.cipher_suite = cipher_suite;
     }
 
     pub(crate) fn remote_static_public(&self) -> x25519::PublicKey {
@@ -505,9 +541,9 @@ impl Handshake {
         now: Instant,
     ) -> Result<(&'a mut [u8], Session), WireGuardError> {
         // initiator.chaining_key = HASH(CONSTRUCTION)
-        let mut chaining_key = INITIAL_CHAIN_KEY;
+        let mut chaining_key = self.cipher_suite.initial_chain_key();
         // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
-        let mut hash = INITIAL_CHAIN_HASH;
+        let mut hash = self.cipher_suite.initial_chain_hash();
         hash = b2s_hash(&hash, self.params.static_public.as_bytes());
         // msg.sender_index = little_endian(initiator.sender_index)
         let peer_index = packet.sender_idx;
@@ -534,7 +570,8 @@ impl Handshake {
 
         let mut peer_static_public_decrypted = [0u8; KEY_LEN];
         // msg.encrypted_static = AEAD(key, 0, initiator.static_public, initiator.hash)
-        aead_chacha20_open(
+        aead_open(
+            self.cipher_suite,
             &mut peer_static_public_decrypted,
             &key,
             0,
@@ -559,7 +596,14 @@ impl Handshake {
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_timestamp = AEAD(key, 0, TAI64N(), initiator.hash)
         let mut timestamp = [0u8; TIMESTAMP_LEN];
-        aead_chacha20_open(&mut timestamp, &key, 0, packet.encrypted_timestamp, &hash)?;
+        aead_open(
+            self.cipher_suite,
+            &mut timestamp,
+            &key,
+            0,
+            packet.encrypted_timestamp,
+            &hash,
+        )?;
 
         let timestamp = Tai64N::parse(&timestamp)?;
 
@@ -636,7 +680,14 @@ impl Handshake {
         // responder.hash = HASH(responder.hash || temp2)
         hash = b2s_hash(&hash, &temp2);
         // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash)
-        aead_chacha20_open(&mut [], &key, 0, packet.encrypted_nothing, &hash)?;
+        aead_open(
+            self.cipher_suite,
+            &mut [],
+            &key,
+            0,
+            packet.encrypted_nothing,
+            &hash,
+        )?;
 
         // responder.hash = HASH(responder.hash || msg.encrypted_nothing)
         // hash = b2s_hash(hash, buf[ENC_NOTHING_OFF..ENC_NOTHING_OFF + ENC_NOTHING_SZ]);
@@ -666,6 +717,7 @@ impl Handshake {
             Index::from_peer(peer_index),
             temp3,
             temp2,
+            self.cipher_suite,
             now,
         ))
     }
@@ -755,9 +807,9 @@ impl Handshake {
         let local_index = self.next_index.wrapping_increment();
 
         // initiator.chaining_key = HASH(CONSTRUCTION)
-        let mut chaining_key = INITIAL_CHAIN_KEY;
+        let mut chaining_key = self.cipher_suite.initial_chain_key();
         // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
-        let mut hash = INITIAL_CHAIN_HASH;
+        let mut hash = self.cipher_suite.initial_chain_hash();
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
         let ephemeral_private = x25519::ReusableSecret::random();
@@ -782,7 +834,8 @@ impl Handshake {
         // key = HMAC(temp, initiator.chaining_key || 0x2)
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_static = AEAD(key, 0, initiator.static_public, initiator.hash)
-        aead_chacha20_seal(
+        aead_seal(
+            self.cipher_suite,
             encrypted_static,
             &key,
             0,
@@ -799,7 +852,14 @@ impl Handshake {
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_timestamp = AEAD(key, 0, TAI64N(), initiator.hash)
         let timestamp = self.stamper.stamp(now);
-        aead_chacha20_seal(encrypted_timestamp, &key, 0, &timestamp, &hash);
+        aead_seal(
+            self.cipher_suite,
+            encrypted_timestamp,
+            &key,
+            0,
+            &timestamp,
+            &hash,
+        );
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
         hash = b2s_hash(&hash, encrypted_timestamp);
 
@@ -885,7 +945,7 @@ impl Handshake {
         // responder.hash = HASH(responder.hash || temp2)
         hash = b2s_hash(&hash, &temp2);
         // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash)
-        aead_chacha20_seal(encrypted_nothing, &key, 0, &[], &hash);
+        aead_seal(self.cipher_suite, encrypted_nothing, &key, 0, &[], &hash);
 
         // Derive keys
         // temp1 = HMAC(initiator.chaining_key, [empty])
@@ -903,7 +963,14 @@ impl Handshake {
 
         Ok((
             dst,
-            Session::new(local_index, Index::from_peer(peer_index), temp2, temp3, now),
+            Session::new(
+                local_index,
+                Index::from_peer(peer_index),
+                temp2,
+                temp3,
+                self.cipher_suite,
+                now,
+            ),
         ))
     }
 }
@@ -911,6 +978,7 @@ impl Handshake {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ring::aead::CHACHA20_POLY1305;
 
     #[test]
     fn chacha20_seal_rfc7530_test_vector() {
@@ -928,7 +996,14 @@ mod tests {
         ];
         let mut buffer = vec![0; plaintext.len() + 16];
 
-        aead_chacha20_seal_inner(&mut buffer, &key, nonce, plaintext, &aad);
+        aead_seal_inner(
+            &CHACHA20_POLY1305,
+            &mut buffer,
+            &key,
+            nonce,
+            plaintext,
+            &aad,
+        );
 
         const EXPECTED_CIPHERTEXT: [u8; 114] = [
             0xd3, 0x1a, 0x8d, 0x34, 0x64, 0x8e, 0x60, 0xdb, 0x7b, 0x86, 0xaf, 0xbc, 0x53, 0xef,
@@ -958,11 +1033,25 @@ mod tests {
 
         let mut encrypted_nothing: [u8; 16] = Default::default();
 
-        aead_chacha20_seal(&mut encrypted_nothing, &key, counter, &[], &aad);
+        aead_seal(
+            CipherSuite::ChaChaPoly,
+            &mut encrypted_nothing,
+            &key,
+            counter,
+            &[],
+            &aad,
+        );
 
         eprintln!("encrypted_nothing: {encrypted_nothing:?}");
 
-        aead_chacha20_open(&mut [], &key, counter, &encrypted_nothing, &aad)
-            .expect("Should open what we just sealed");
+        aead_open(
+            CipherSuite::ChaChaPoly,
+            &mut [],
+            &key,
+            counter,
+            &encrypted_nothing,
+            &aad,
+        )
+        .expect("Should open what we just sealed");
     }
 }

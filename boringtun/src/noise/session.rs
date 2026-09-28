@@ -6,8 +6,9 @@ use super::{
     timers::{REJECT_AFTER_TIME, SHOULD_NOT_USE_AFTER_TIME},
     PacketData,
 };
+use crate::noise::cipher_suite::CipherSuite;
 use crate::noise::errors::WireGuardError;
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey};
 use std::time::Instant;
 
 pub struct Session {
@@ -18,6 +19,7 @@ pub struct Session {
     sender: LessSafeKey,
     sending_key_counter: u64,
     receiving_key_counter: ReceivingKeyCounterValidator,
+    cipher_suite: CipherSuite,
 }
 
 impl std::fmt::Debug for Session {
@@ -171,18 +173,20 @@ impl Session {
         peer_index: Index,
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
+        cipher_suite: CipherSuite,
         now: Instant,
     ) -> Session {
+        let aead = cipher_suite.aead();
+
         Session {
             established_at: now,
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: LessSafeKey::new(
-                UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
-            ),
-            sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
+            receiver: LessSafeKey::new(UnboundKey::new(aead, &receiving_key).unwrap()),
+            sender: LessSafeKey::new(UnboundKey::new(aead, &sending_key).unwrap()),
             sending_key_counter: 0,
             receiving_key_counter: Default::default(),
+            cipher_suite,
         }
     }
 
@@ -200,6 +204,11 @@ impl Session {
 
     pub(crate) fn should_use_at(&self, time: Instant) -> bool {
         time <= self.established_at + SHOULD_NOT_USE_AFTER_TIME
+    }
+
+    /// Whether the sending key has encrypted enough messages to be replaced.
+    pub(crate) fn should_rekey(&self) -> bool {
+        self.sending_key_counter >= self.cipher_suite.rekey_after_messages()
     }
 
     /// Returns true if receiving counter is good to use
@@ -234,6 +243,9 @@ impl Session {
         }
 
         let sending_key_counter = self.sending_key_counter;
+        if sending_key_counter >= self.cipher_suite.reject_after_messages() {
+            return Err(WireGuardError::NoCurrentSession);
+        }
         self.sending_key_counter += 1;
 
         let (message_type, rest) = dst.split_at_mut(4);
@@ -246,8 +258,7 @@ impl Session {
 
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
         let n = {
-            let mut nonce = [0u8; 12];
-            nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+            let nonce = self.cipher_suite.nonce(sending_key_counter);
             data[..src.len()].copy_from_slice(src);
             self.sender
                 .seal_in_place_separate_tag(
@@ -289,8 +300,7 @@ impl Session {
         self.receiving_counter_quick_check(packet.counter)?;
 
         let ret = {
-            let mut nonce = [0u8; 12];
-            nonce[4..12].copy_from_slice(&packet.counter.to_le_bytes());
+            let nonce = self.cipher_suite.nonce(packet.counter);
             dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
             self.receiver
                 .open_in_place(
@@ -312,5 +322,93 @@ impl Session {
             self.receiving_key_counter.next,
             self.receiving_key_counter.receive_cnt,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::noise::{Index, Tunn, TunnResult};
+    use crate::x25519::{PublicKey, StaticSecret};
+    use std::time::Duration;
+
+    #[test]
+    fn aes_gcm_session_schedules_handshake_after_rekey_after_messages() {
+        let (mut tunn, now) = established_initiator(CipherSuite::AesGcm);
+        current_session(&mut tunn).sending_key_counter =
+            CipherSuite::AesGcm.rekey_after_messages() - 1;
+
+        tunn.encapsulate_data_at(&[], &mut [0u8; 64], now).unwrap();
+
+        let reason = tunn.next_timer_update().map(|(_, reason)| reason);
+        assert_eq!(reason, Some("scheduled handshake"));
+    }
+
+    #[test]
+    fn aes_gcm_session_refuses_to_encrypt_after_reject_after_messages() {
+        let (mut tunn, now) = established_initiator(CipherSuite::AesGcm);
+        current_session(&mut tunn).sending_key_counter =
+            CipherSuite::AesGcm.reject_after_messages();
+
+        let result = tunn.encapsulate_data_at(&[], &mut [0u8; 64], now);
+
+        assert!(matches!(result, Err(WireGuardError::NoCurrentSession)));
+    }
+
+    fn established_initiator(cipher_suite: CipherSuite) -> (Tunn, Instant) {
+        let now = Instant::now();
+        let secret_a = StaticSecret::random();
+        let secret_b = StaticSecret::random();
+        let public_a = PublicKey::from(&secret_a);
+        let public_b = PublicKey::from(&secret_b);
+        let mut a = tunn(secret_a, public_b, 1, cipher_suite, now);
+        let mut b = tunn(secret_b, public_a, 2, cipher_suite, now);
+
+        let mut init = [0u8; 256];
+        let mut response = [0u8; 256];
+        let mut keepalive = [0u8; 256];
+        let TunnResult::WriteToNetwork(init) =
+            a.format_handshake_initiation_at(&mut init, false, now)
+        else {
+            panic!("expected handshake initiation");
+        };
+        let TunnResult::WriteToNetwork(response) = b.decapsulate_at(None, init, &mut response, now)
+        else {
+            panic!("expected handshake response");
+        };
+        let TunnResult::WriteToNetwork(_) = a.decapsulate_at(None, response, &mut keepalive, now)
+        else {
+            panic!("expected keepalive");
+        };
+
+        (a, now)
+    }
+
+    fn tunn(
+        secret: StaticSecret,
+        peer: PublicKey,
+        index: u32,
+        cipher_suite: CipherSuite,
+        now: Instant,
+    ) -> Tunn {
+        let mut tunn = Tunn::new_at(
+            secret,
+            peer,
+            None,
+            None,
+            Index::new_local(index),
+            None,
+            0,
+            now,
+            now,
+            Duration::from_secs(1_700_000_000),
+        );
+        tunn.set_cipher_suite(cipher_suite);
+
+        tunn
+    }
+
+    fn current_session(tunn: &mut Tunn) -> &mut Session {
+        tunn.sessions[tunn.current].as_mut().unwrap()
     }
 }

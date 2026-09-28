@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use boringtun::noise::errors::WireGuardError;
 use boringtun::noise::rate_limiter::RateLimiter;
-use boringtun::noise::{Index, Packet, Tunn, TunnResult};
+use boringtun::noise::{CipherSuite, Index, Packet, Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
 
 // Protocol constants from the WireGuard whitepaper (§6.1, table on p. 14).
@@ -175,6 +175,8 @@ pub struct Builder {
     seed_b: u64,
     responder_under_load: bool,
     responder_expects_different_key: bool,
+    cipher_suite_a: CipherSuite,
+    cipher_suite_b: CipherSuite,
 }
 
 impl Builder {
@@ -190,6 +192,12 @@ impl Builder {
 
     pub fn persistent_keepalive_b(mut self, interval_secs: u16) -> Self {
         self.persistent_keepalive_b = Some(interval_secs);
+        self
+    }
+
+    pub fn cipher_suites(mut self, a: CipherSuite, b: CipherSuite) -> Self {
+        self.cipher_suite_a = a;
+        self.cipher_suite_b = b;
         self
     }
 
@@ -222,7 +230,7 @@ impl Builder {
         let secret_b = StaticSecret::random();
         let public_b = PublicKey::from(&secret_b);
 
-        let a = Tunn::new_at(
+        let mut a = Tunn::new_at(
             secret_a,
             public_b,
             self.psk_a.map(StaticSecret::from),
@@ -234,6 +242,7 @@ impl Builder {
             start,
             unix,
         );
+        a.set_cipher_suite(self.cipher_suite_a);
 
         let expected_by_b = if self.responder_expects_different_key {
             PublicKey::from(&StaticSecret::random())
@@ -243,7 +252,7 @@ impl Builder {
         let rate_limiter = self
             .responder_under_load
             .then(|| Arc::new(RateLimiter::new_at(&public_b, 0, start)));
-        let b = Tunn::new_at(
+        let mut b = Tunn::new_at(
             secret_b,
             expected_by_b,
             self.psk_b.map(StaticSecret::from),
@@ -255,6 +264,7 @@ impl Builder {
             start,
             unix,
         );
+        b.set_cipher_suite(self.cipher_suite_b);
 
         Sim {
             start,
@@ -299,6 +309,8 @@ impl Sim {
             seed_b: 2,
             responder_under_load: false,
             responder_expects_different_key: false,
+            cipher_suite_a: CipherSuite::default(),
+            cipher_suite_b: CipherSuite::default(),
         }
     }
 
