@@ -381,7 +381,7 @@ fn decrypt_initiator_static(
 ) -> Result<[u8; KEY_LEN], WireGuardError> {
     // initiator.chaining_key = HASH(CONSTRUCTION)
     let mut chaining_key = suite.initial_chain_key();
-    // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
+    // initiator.hash = HASH(HASH(initiator.chaining_key || prologue) || responder.static_public)
     let mut hash = suite.initial_chain_hash();
     hash = b2s_hash(&hash, static_public.as_bytes());
     // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
@@ -544,7 +544,7 @@ impl Handshake {
     ) -> Result<(&'a mut [u8], Session), WireGuardError> {
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = self.cipher_suite.initial_chain_key();
-        // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
+        // initiator.hash = HASH(HASH(initiator.chaining_key || prologue) || responder.static_public)
         let mut hash = self.cipher_suite.initial_chain_hash();
         hash = b2s_hash(&hash, self.params.static_public.as_bytes());
         // msg.sender_index = little_endian(initiator.sender_index)
@@ -810,7 +810,7 @@ impl Handshake {
 
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = self.cipher_suite.initial_chain_key();
-        // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
+        // initiator.hash = HASH(HASH(initiator.chaining_key || prologue) || responder.static_public)
         let mut hash = self.cipher_suite.initial_chain_hash();
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()

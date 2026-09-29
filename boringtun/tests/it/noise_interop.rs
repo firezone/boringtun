@@ -15,23 +15,29 @@ use typenum::U16;
 
 use crate::harness::ipv4_packet;
 
-const IDENTIFIER: &[u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
+const WIREGUARD_PROLOGUE: &[u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
+const AES_GCM_PROLOGUE: &[u8] = b"Firezone v1 AESGCM";
 const LABEL_MAC1: &[u8] = b"mac1----";
 
 #[test]
 fn chacha_poly_interoperates_with_snow() {
     interoperate_with_snow(
         "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s",
+        WIREGUARD_PROLOGUE,
         CipherSuite::ChaChaPoly,
     );
 }
 
 #[test]
 fn aes_gcm_interoperates_with_snow() {
-    interoperate_with_snow("Noise_IKpsk2_25519_AESGCM_BLAKE2s", CipherSuite::AesGcm);
+    interoperate_with_snow(
+        "Noise_IKpsk2_25519_AESGCM_BLAKE2s",
+        AES_GCM_PROLOGUE,
+        CipherSuite::AesGcm,
+    );
 }
 
-fn interoperate_with_snow(protocol_name: &str, cipher_suite: CipherSuite) {
+fn interoperate_with_snow(protocol_name: &str, prologue: &[u8], cipher_suite: CipherSuite) {
     let now = Instant::now();
     let initiator_secret = StaticSecret::random();
     let responder_secret = StaticSecret::random();
@@ -58,7 +64,7 @@ fn interoperate_with_snow(protocol_name: &str, cipher_suite: CipherSuite) {
         .unwrap()
         .psk(2, &psk)
         .unwrap()
-        .prologue(IDENTIFIER)
+        .prologue(prologue)
         .unwrap()
         .build_initiator()
         .unwrap();

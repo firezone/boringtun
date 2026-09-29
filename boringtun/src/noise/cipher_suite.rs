@@ -49,7 +49,7 @@ impl CipherSuite {
         self.initial_state().chain_key
     }
 
-    /// `HASH(initial_chain_key || IDENTIFIER)`
+    /// `HASH(initial_chain_key || prologue)`
     pub(crate) fn initial_chain_hash(self) -> [u8; 32] {
         self.initial_state().chain_hash
     }
@@ -100,12 +100,13 @@ impl CipherSuite {
 
 const CHACHA_POLY_PROTOCOL_NAME: &[u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
 const AES_GCM_PROTOCOL_NAME: &[u8] = b"Noise_IKpsk2_25519_AESGCM_BLAKE2s";
-const IDENTIFIER: &[u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
+const WIREGUARD_PROLOGUE: &[u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
+const AES_GCM_PROLOGUE: &[u8] = b"Firezone v1 AESGCM";
 
 static CHACHA_POLY_INITIAL_STATE: LazyLock<InitialState> =
-    LazyLock::new(|| InitialState::new(CHACHA_POLY_PROTOCOL_NAME));
+    LazyLock::new(|| InitialState::new(CHACHA_POLY_PROTOCOL_NAME, WIREGUARD_PROLOGUE));
 static AES_GCM_INITIAL_STATE: LazyLock<InitialState> =
-    LazyLock::new(|| InitialState::new(AES_GCM_PROTOCOL_NAME));
+    LazyLock::new(|| InitialState::new(AES_GCM_PROTOCOL_NAME, AES_GCM_PROLOGUE));
 
 struct InitialState {
     chain_key: [u8; 32],
@@ -113,9 +114,9 @@ struct InitialState {
 }
 
 impl InitialState {
-    fn new(protocol_name: &[u8]) -> Self {
+    fn new(protocol_name: &[u8], prologue: &[u8]) -> Self {
         let chain_key = b2s_hash(protocol_name, &[]);
-        let chain_hash = b2s_hash(&chain_key, IDENTIFIER);
+        let chain_hash = b2s_hash(&chain_key, prologue);
 
         Self {
             chain_key,
