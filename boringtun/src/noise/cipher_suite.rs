@@ -1,4 +1,8 @@
+use std::sync::LazyLock;
+
 use ring::aead::{Algorithm, AES_256_GCM, CHACHA20_POLY1305};
+
+use super::handshake::b2s_hash;
 
 /// The Noise protocol spoken between two [`Tunn`](super::Tunn)s.
 ///
@@ -42,30 +46,12 @@ impl CipherSuite {
 
     /// `HASH(protocol_name)`
     pub(crate) fn initial_chain_key(self) -> [u8; 32] {
-        match self {
-            CipherSuite::ChaChaPoly => [
-                96, 226, 109, 174, 243, 39, 239, 192, 46, 195, 53, 226, 160, 37, 210, 208, 22, 235,
-                66, 6, 248, 114, 119, 245, 45, 56, 209, 152, 139, 120, 205, 54,
-            ],
-            CipherSuite::AesGcm => [
-                239, 203, 191, 167, 13, 128, 238, 35, 220, 247, 237, 244, 63, 185, 136, 222, 109,
-                234, 136, 254, 37, 254, 172, 56, 81, 187, 75, 43, 13, 9, 211, 178,
-            ],
-        }
+        self.initial_state().chain_key
     }
 
     /// `HASH(initial_chain_key || IDENTIFIER)`
     pub(crate) fn initial_chain_hash(self) -> [u8; 32] {
-        match self {
-            CipherSuite::ChaChaPoly => [
-                34, 17, 179, 97, 8, 26, 197, 102, 105, 18, 67, 219, 69, 138, 213, 50, 45, 156, 108,
-                102, 34, 147, 232, 183, 14, 225, 156, 101, 186, 7, 158, 243,
-            ],
-            CipherSuite::AesGcm => [
-                234, 53, 188, 1, 149, 21, 240, 59, 157, 13, 110, 10, 205, 252, 66, 86, 33, 185,
-                208, 88, 53, 59, 152, 5, 203, 244, 150, 99, 176, 201, 69, 48,
-            ],
-        }
+        self.initial_state().chain_hash
     }
 
     pub(crate) fn aead(self) -> &'static Algorithm {
@@ -103,6 +89,39 @@ impl CipherSuite {
             CipherSuite::AesGcm => AES_GCM_REJECT_AFTER_MESSAGES,
         }
     }
+
+    fn initial_state(self) -> &'static InitialState {
+        match self {
+            CipherSuite::ChaChaPoly => &CHACHA_POLY_INITIAL_STATE,
+            CipherSuite::AesGcm => &AES_GCM_INITIAL_STATE,
+        }
+    }
+}
+
+const CHACHA_POLY_PROTOCOL_NAME: &[u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
+const AES_GCM_PROTOCOL_NAME: &[u8] = b"Noise_IKpsk2_25519_AESGCM_BLAKE2s";
+const IDENTIFIER: &[u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
+
+static CHACHA_POLY_INITIAL_STATE: LazyLock<InitialState> =
+    LazyLock::new(|| InitialState::new(CHACHA_POLY_PROTOCOL_NAME));
+static AES_GCM_INITIAL_STATE: LazyLock<InitialState> =
+    LazyLock::new(|| InitialState::new(AES_GCM_PROTOCOL_NAME));
+
+struct InitialState {
+    chain_key: [u8; 32],
+    chain_hash: [u8; 32],
+}
+
+impl InitialState {
+    fn new(protocol_name: &[u8]) -> Self {
+        let chain_key = b2s_hash(protocol_name, &[]);
+        let chain_hash = b2s_hash(&chain_key, IDENTIFIER);
+
+        Self {
+            chain_key,
+            chain_hash,
+        }
+    }
 }
 
 /// Keeps the confidentiality advantage against AES-GCM below 2^-57 for messages of up to 2^7 blocks
@@ -115,6 +134,27 @@ const AES_GCM_REKEY_AFTER_MESSAGES: u64 = AES_GCM_REJECT_AFTER_MESSAGES / 2;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chacha_poly_initial_state_matches_wireguard() {
+        let chain_key = CipherSuite::ChaChaPoly.initial_chain_key();
+        let chain_hash = CipherSuite::ChaChaPoly.initial_chain_hash();
+
+        assert_eq!(
+            chain_key,
+            [
+                96, 226, 109, 174, 243, 39, 239, 192, 46, 195, 53, 226, 160, 37, 210, 208, 22, 235,
+                66, 6, 248, 114, 119, 245, 45, 56, 209, 152, 139, 120, 205, 54,
+            ]
+        );
+        assert_eq!(
+            chain_hash,
+            [
+                34, 17, 179, 97, 8, 26, 197, 102, 105, 18, 67, 219, 69, 138, 213, 50, 45, 156, 108,
+                102, 34, 147, 232, 183, 14, 225, 156, 101, 186, 7, 158, 243,
+            ]
+        );
+    }
 
     #[test]
     fn chacha_poly_nonce_is_little_endian() {
