@@ -453,12 +453,14 @@ impl NoiseParams {
 }
 
 impl Handshake {
+    #[expect(clippy::too_many_arguments, reason = "We don't care that much.")]
     pub(crate) fn new(
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
         global_idx: Index,
         preshared_key: Option<x25519_dalek::StaticSecret>,
+        cipher_suite: CipherSuite,
         unix_instant: Instant,
         unix: Duration,
     ) -> Handshake {
@@ -478,12 +480,8 @@ impl Handshake {
             stamper: TimeStamper::new(unix_instant, unix),
             cookies: Default::default(),
             last_rtt: None,
-            cipher_suite: CipherSuite::default(),
+            cipher_suite,
         }
-    }
-
-    pub(crate) fn set_cipher_suite(&mut self, cipher_suite: CipherSuite) {
-        self.cipher_suite = cipher_suite;
     }
 
     pub(crate) fn cipher_suite(&self) -> CipherSuite {

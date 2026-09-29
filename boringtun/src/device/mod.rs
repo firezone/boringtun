@@ -39,7 +39,7 @@ use std::time::{Duration, Instant};
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::{Index, Packet, Tunn, TunnResult};
+use crate::noise::{CipherSuite, Index, Packet, Tunn, TunnResult};
 use crate::x25519;
 use allowed_ips::AllowedIps;
 use parking_lot::Mutex;
@@ -332,6 +332,7 @@ impl Device {
             device_key_pair.0.clone(),
             pub_key,
             preshared_key.clone(),
+            CipherSuite::default(),
             keepalive,
             Index::new_local(next_index),
             None,

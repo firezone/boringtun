@@ -215,6 +215,7 @@ impl Tunn {
             static_private,
             peer_static_public,
             preshared_key.map(x25519::StaticSecret::from),
+            CipherSuite::default(),
             persistent_keepalive,
             Index::new_local(index),
             rate_limiter,
@@ -233,6 +234,7 @@ impl Tunn {
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
         preshared_key: Option<x25519::StaticSecret>,
+        cipher_suite: CipherSuite,
         persistent_keepalive: Option<u16>,
         index: Index,
         rate_limiter: Option<Arc<RateLimiter>>,
@@ -250,6 +252,7 @@ impl Tunn {
                 peer_static_public,
                 index,
                 preshared_key,
+                cipher_suite,
                 unix_instant,
                 unix,
             ),
@@ -336,14 +339,6 @@ impl Tunn {
     /// Defaults to 5s.
     pub fn set_rekey_timeout(&mut self, rekey_timeout: Duration) {
         self.timers.set_rekey_timeout(rekey_timeout);
-    }
-
-    /// Set the [`CipherSuite`] of future handshakes and the sessions they establish.
-    ///
-    /// Set it before the first handshake: the peer must use the same suite.
-    /// Defaults to [`CipherSuite::ChaChaPoly`].
-    pub fn set_cipher_suite(&mut self, cipher_suite: CipherSuite) {
-        self.handshake.set_cipher_suite(cipher_suite);
     }
 
     pub fn cipher_suite(&self) -> CipherSuite {

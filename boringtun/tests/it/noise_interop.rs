@@ -42,6 +42,7 @@ fn interoperate_with_snow(protocol_name: &str, cipher_suite: CipherSuite) {
         responder_secret,
         PublicKey::from(&initiator_secret),
         Some(StaticSecret::from(psk)),
+        cipher_suite,
         None,
         Index::new_local(2),
         None,
@@ -50,7 +51,6 @@ fn interoperate_with_snow(protocol_name: &str, cipher_suite: CipherSuite) {
         now,
         Duration::from_secs(1_700_000_000),
     );
-    responder.set_cipher_suite(cipher_suite);
     let mut initiator = snow::Builder::new(protocol_name.parse().unwrap())
         .local_private_key(&initiator_secret.to_bytes())
         .unwrap()

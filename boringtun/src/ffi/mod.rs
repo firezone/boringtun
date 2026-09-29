@@ -6,7 +6,7 @@
 #![allow(clippy::missing_safety_doc, non_camel_case_types)]
 
 //! C bindings for the BoringTun library
-use super::noise::{Index, Tunn, TunnResult};
+use super::noise::{CipherSuite, Index, Tunn, TunnResult};
 use crate::x25519::{PublicKey, StaticSecret};
 use base64::prelude::*;
 use hex::encode as encode_hex;
@@ -291,6 +291,7 @@ pub unsafe extern "C" fn new_tunnel(
         private_key,
         public_key,
         preshared_key,
+        CipherSuite::default(),
         keep_alive,
         Index::new_local(index),
         None,

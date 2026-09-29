@@ -391,10 +391,11 @@ mod tests {
         cipher_suite: CipherSuite,
         now: Instant,
     ) -> Tunn {
-        let mut tunn = Tunn::new_at(
+        Tunn::new_at(
             secret,
             peer,
             None,
+            cipher_suite,
             None,
             Index::new_local(index),
             None,
@@ -402,10 +403,7 @@ mod tests {
             now,
             now,
             Duration::from_secs(1_700_000_000),
-        );
-        tunn.set_cipher_suite(cipher_suite);
-
-        tunn
+        )
     }
 
     fn current_session(tunn: &mut Tunn) -> &mut Session {

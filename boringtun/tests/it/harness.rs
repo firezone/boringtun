@@ -230,10 +230,11 @@ impl Builder {
         let secret_b = StaticSecret::random();
         let public_b = PublicKey::from(&secret_b);
 
-        let mut a = Tunn::new_at(
+        let a = Tunn::new_at(
             secret_a,
             public_b,
             self.psk_a.map(StaticSecret::from),
+            self.cipher_suite_a,
             None,
             Index::new_local(1),
             None,
@@ -242,7 +243,6 @@ impl Builder {
             start,
             unix,
         );
-        a.set_cipher_suite(self.cipher_suite_a);
 
         let expected_by_b = if self.responder_expects_different_key {
             PublicKey::from(&StaticSecret::random())
@@ -252,10 +252,11 @@ impl Builder {
         let rate_limiter = self
             .responder_under_load
             .then(|| Arc::new(RateLimiter::new_at(&public_b, 0, start)));
-        let mut b = Tunn::new_at(
+        let b = Tunn::new_at(
             secret_b,
             expected_by_b,
             self.psk_b.map(StaticSecret::from),
+            self.cipher_suite_b,
             self.persistent_keepalive_b,
             Index::new_local(2),
             rate_limiter,
@@ -264,7 +265,6 @@ impl Builder {
             start,
             unix,
         );
-        b.set_cipher_suite(self.cipher_suite_b);
 
         Sim {
             start,
