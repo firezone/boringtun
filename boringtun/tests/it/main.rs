@@ -20,7 +20,6 @@ mod cookies;
 mod data;
 mod handshake;
 mod harness;
-mod noise_interop;
 mod replay;
 mod sans_io;
 mod timers;

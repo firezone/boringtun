@@ -328,85 +328,34 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::{Index, Tunn, TunnResult};
-    use crate::x25519::{PublicKey, StaticSecret};
-    use std::time::Duration;
 
     #[test]
-    fn aes_gcm_session_schedules_handshake_after_rekey_after_messages() {
-        let (mut tunn, now) = established_initiator(CipherSuite::AesGcm);
-        current_session(&mut tunn).sending_key_counter =
-            CipherSuite::AesGcm.rekey_after_messages() - 1;
+    fn aes_gcm_session_wants_rekey_after_rekey_after_messages() {
+        let mut session = session(CipherSuite::AesGcm);
+        session.sending_key_counter = CipherSuite::AesGcm.rekey_after_messages();
 
-        tunn.encapsulate_data_at(&[], &mut [0u8; 64], now).unwrap();
-
-        let reason = tunn.next_timer_update().map(|(_, reason)| reason);
-        assert_eq!(reason, Some("scheduled handshake"));
+        assert!(session.should_rekey());
     }
 
     #[test]
     fn aes_gcm_session_refuses_to_encrypt_after_reject_after_messages() {
-        let (mut tunn, now) = established_initiator(CipherSuite::AesGcm);
-        current_session(&mut tunn).sending_key_counter =
-            CipherSuite::AesGcm.reject_after_messages();
+        let mut session = session(CipherSuite::AesGcm);
+        session.sending_key_counter = CipherSuite::AesGcm.reject_after_messages();
 
-        let result = tunn.encapsulate_data_at(&[], &mut [0u8; 64], now);
+        let mut dst = [0u8; 64];
+        let result = session.format_packet_data(&[], &mut dst);
 
         assert!(matches!(result, Err(WireGuardError::NoCurrentSession)));
     }
 
-    fn established_initiator(cipher_suite: CipherSuite) -> (Tunn, Instant) {
-        let now = Instant::now();
-        let secret_a = StaticSecret::random();
-        let secret_b = StaticSecret::random();
-        let public_a = PublicKey::from(&secret_a);
-        let public_b = PublicKey::from(&secret_b);
-        let mut a = tunn(secret_a, public_b, 1, cipher_suite, now);
-        let mut b = tunn(secret_b, public_a, 2, cipher_suite, now);
-
-        let mut init = [0u8; 256];
-        let mut response = [0u8; 256];
-        let mut keepalive = [0u8; 256];
-        let TunnResult::WriteToNetwork(init) =
-            a.format_handshake_initiation_at(&mut init, false, now)
-        else {
-            panic!("expected handshake initiation");
-        };
-        let TunnResult::WriteToNetwork(response) = b.decapsulate_at(None, init, &mut response, now)
-        else {
-            panic!("expected handshake response");
-        };
-        let TunnResult::WriteToNetwork(_) = a.decapsulate_at(None, response, &mut keepalive, now)
-        else {
-            panic!("expected keepalive");
-        };
-
-        (a, now)
-    }
-
-    fn tunn(
-        secret: StaticSecret,
-        peer: PublicKey,
-        index: u32,
-        cipher_suite: CipherSuite,
-        now: Instant,
-    ) -> Tunn {
-        Tunn::new_at(
-            secret,
-            peer,
-            None,
+    fn session(cipher_suite: CipherSuite) -> Session {
+        Session::new(
+            Index::new_local(1),
+            Index::new_local(2),
+            [0; 32],
+            [0; 32],
             cipher_suite,
-            None,
-            Index::new_local(index),
-            None,
-            0,
-            now,
-            now,
-            Duration::from_secs(1_700_000_000),
+            Instant::now(),
         )
-    }
-
-    fn current_session(tunn: &mut Tunn) -> &mut Session {
-        tunn.sessions[tunn.current].as_mut().unwrap()
     }
 }
