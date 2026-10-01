@@ -8,14 +8,15 @@ use super::{
 };
 use crate::noise::errors::WireGuardError;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, CHACHA20_POLY1305};
+use std::sync::Arc;
 use std::time::Instant;
 
 pub struct Session {
     established_at: Instant,
     pub(crate) receiving_index: Index,
     sending_index: Index,
-    receiver: LessSafeKey,
-    sender: LessSafeKey,
+    receiver: Arc<LessSafeKey>,
+    sender: Arc<LessSafeKey>,
     sending_key_counter: u64,
     receiving_key_counter: ReceivingKeyCounterValidator,
 }
@@ -177,10 +178,12 @@ impl Session {
             established_at: now,
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: LessSafeKey::new(
+            receiver: Arc::new(LessSafeKey::new(
                 UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
-            ),
-            sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
+            )),
+            sender: Arc::new(LessSafeKey::new(
+                UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap(),
+            )),
             sending_key_counter: 0,
             receiving_key_counter: Default::default(),
         }
@@ -246,7 +249,7 @@ impl Session {
         data[..src.len()].copy_from_slice(src);
 
         Ok(PendingSeal {
-            key: self.sender.clone(),
+            key: Arc::clone(&self.sender),
             counter: sending_key_counter,
             plaintext_len: src.len(),
         })
@@ -275,7 +278,7 @@ impl Session {
         dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
 
         Ok(PendingOpen {
-            key: self.receiver.clone(),
+            key: Arc::clone(&self.receiver),
             receiving_index: self.receiving_index,
             counter: packet.counter,
             ciphertext_len: ct_len,
@@ -313,7 +316,7 @@ impl Session {
 /// Until [`PendingSeal::seal`] runs, the buffer holds the plaintext and must not be sent.
 #[must_use = "the data message is not encrypted until it is sealed"]
 pub struct PendingSeal {
-    key: LessSafeKey,
+    key: Arc<LessSafeKey>,
     counter: u64,
     plaintext_len: usize,
 }
@@ -358,7 +361,7 @@ impl PendingSeal {
 /// to authenticate never advances the replay window.
 #[must_use = "the data message is not decrypted until it is opened"]
 pub struct PendingOpen {
-    key: LessSafeKey,
+    key: Arc<LessSafeKey>,
     receiving_index: Index,
     counter: u64,
     ciphertext_len: usize,
