@@ -15,12 +15,12 @@ fn deferred_seal_matches_the_eager_path() {
     let ip_packet = ipv4_packet(b"sealed later");
     let now = sim.now;
 
-    let mut datagram = vec![0u8; BUF];
     let seal = sim
         .tunn_mut(A)
-        .encapsulate_data_deferred_at(&ip_packet, &mut datagram, now)
+        .encapsulate_data_deferred_at(ip_packet.len(), now)
         .unwrap();
-    let len = seal.seal(&mut datagram);
+    let mut datagram = vec![0u8; BUF];
+    let len = seal.seal_into(&ip_packet, &mut datagram);
     datagram.truncate(len);
 
     assert_eq!(len, sim.encapsulate(A, &ip_packet).len());
@@ -33,21 +33,27 @@ fn seals_running_out_of_order_keep_their_counters() {
     let ip_packets = (0..3).map(|i| ipv4_packet(&[i])).collect::<Vec<_>>();
     let now = sim.now;
 
-    let mut datagrams = Vec::new();
-    let mut seals = Vec::new();
-    for ip_packet in &ip_packets {
-        let mut datagram = vec![0u8; BUF];
-        let seal = sim
-            .tunn_mut(A)
-            .encapsulate_data_deferred_at(ip_packet, &mut datagram, now)
-            .unwrap();
-        datagrams.push(datagram);
-        seals.push(seal);
-    }
-    for (seal, datagram) in seals.into_iter().zip(&mut datagrams).rev() {
-        let len = seal.seal(datagram);
-        datagram.truncate(len);
-    }
+    let seals = ip_packets
+        .iter()
+        .map(|ip_packet| {
+            sim.tunn_mut(A)
+                .encapsulate_data_deferred_at(ip_packet.len(), now)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let mut datagrams = seals
+        .into_iter()
+        .zip(&ip_packets)
+        .rev()
+        .map(|(seal, ip_packet)| {
+            let mut datagram = vec![0u8; BUF];
+            let len = seal.seal_into(ip_packet, &mut datagram);
+            datagram.truncate(len);
+
+            datagram
+        })
+        .collect::<Vec<_>>();
+    datagrams.reverse();
 
     let counters = datagrams.iter().map(|d| counter(d)).collect::<Vec<_>>();
     assert!(counters.is_sorted());

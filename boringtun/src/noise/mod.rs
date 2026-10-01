@@ -393,32 +393,43 @@ impl Tunn {
         dst: &mut [u8],
         now: Instant,
     ) -> Result<usize, WireGuardError> {
-        let len = self.encapsulate_data_deferred_at(src, dst, now)?.seal(dst);
+        let buf_len = dst.len();
+        let num_required = src.len() + DATA_OVERHEAD_SZ;
+
+        if buf_len < num_required {
+            tracing::warn!(%buf_len, %num_required, "Destination buffer too small for outgoing packet data");
+
+            return Err(WireGuardError::DestinationBufferTooSmall);
+        }
+
+        let len = self
+            .encapsulate_data_deferred_at(src.len(), now)?
+            .seal_into(src, dst);
 
         Ok(len)
     }
 
-    /// Like [`Tunn::encapsulate_data_at`] but defers the encryption to the returned [`PendingSeal`].
+    /// Like [`Tunn::encapsulate_data_at`] but defers writing and encrypting the data message to
+    /// the returned [`PendingSeal`].
     ///
-    /// All state of the [`Tunn`] is updated immediately; only the AEAD seal is left to the caller,
-    /// which may run it on another thread. `dst` holds the header and the plaintext until then.
+    /// All state of the [`Tunn`] is updated immediately for a plaintext of `len` bytes; the
+    /// caller may run [`PendingSeal::seal_into`] later and on another thread.
     pub fn encapsulate_data_deferred_at(
         &mut self,
-        src: &[u8],
-        dst: &mut [u8],
+        len: usize,
         now: Instant,
     ) -> Result<PendingSeal, WireGuardError> {
         let seal = self
             .sending_session(now)
             .ok_or(WireGuardError::NoCurrentSession)?
-            .prepare_packet_data(src, dst)?;
+            .prepare_packet_data();
 
         self.timer_tick(TimerName::TimeLastPacketSent, now);
         // Exclude Keepalive packets from timer update.
-        if !src.is_empty() {
+        if len != 0 {
             self.timer_tick(TimerName::TimeLastDataPacketSent, now);
         }
-        self.tx_bytes += src.len();
+        self.tx_bytes += len;
 
         Ok(seal)
     }
