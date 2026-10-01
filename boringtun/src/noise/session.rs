@@ -45,8 +45,6 @@ struct ReceivingKeyCounterValidator {
     /// In order to avoid replays while allowing for some reordering of the packets, we keep a
     /// bitmap of received packets, and the value of the highest counter
     next: u64,
-    /// Used to estimate packet loss
-    receive_cnt: u64,
     bitmap: [u64; N_WORDS as usize],
 }
 
@@ -54,7 +52,6 @@ impl Default for ReceivingKeyCounterValidator {
     fn default() -> Self {
         Self {
             next: Default::default(),
-            receive_cnt: Default::default(),
             bitmap: [0; _],
         }
     }
@@ -209,11 +206,7 @@ impl Session {
 
     /// Returns true if receiving counter is good to use, and marks it as used {
     fn receiving_counter_mark(&mut self, counter: u64) -> Result<(), WireGuardError> {
-        let ret = self.receiving_key_counter.mark_did_receive(counter);
-        if ret.is_ok() {
-            self.receiving_key_counter.receive_cnt += 1;
-        }
-        ret
+        self.receiving_key_counter.mark_did_receive(counter)
     }
 
     /// src - an IP packet from the interface
@@ -304,13 +297,5 @@ impl Session {
         // After decryption is done, check counter again, and mark as received
         self.receiving_counter_mark(packet.counter)?;
         Ok(ret)
-    }
-
-    /// Returns the estimated downstream packet loss for this session
-    pub(super) fn current_packet_cnt(&self) -> (u64, u64) {
-        (
-            self.receiving_key_counter.next,
-            self.receiving_key_counter.receive_cnt,
-        )
     }
 }

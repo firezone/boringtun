@@ -17,12 +17,10 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::x25519;
 
-#[cfg(feature = "packet-queue")]
-use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
@@ -30,19 +28,15 @@ const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
 const IPV4_MIN_HEADER_SIZE: usize = 20;
 const IPV4_LEN_OFF: usize = 2;
 const IPV4_SRC_IP_OFF: usize = 12;
-const IPV4_DST_IP_OFF: usize = 16;
 const IPV4_IP_SZ: usize = 4;
 
 const IPV6_MIN_HEADER_SIZE: usize = 40;
 const IPV6_LEN_OFF: usize = 4;
 const IPV6_SRC_IP_OFF: usize = 8;
-const IPV6_DST_IP_OFF: usize = 24;
 const IPV6_IP_SZ: usize = 16;
 
 const IP_LEN_SZ: usize = 2;
 
-#[cfg(feature = "packet-queue")]
-const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 ///
 /// We use a `u8` to align with the number of bits reserved in [`Index`] for the sessions.
@@ -71,13 +65,8 @@ pub struct Tunn {
     sessions: [Option<session::Session>; N_SESSIONS as usize],
     /// Index of most recently used session
     current: Index,
-    /// Queue to store blocked packets
-    #[cfg(feature = "packet-queue")]
-    packet_queue: VecDeque<Vec<u8>>,
     /// Keeps tabs on the expiring timers
     timers: timers::Timers,
-    tx_bytes: usize,
-    rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
 }
 
@@ -174,57 +163,6 @@ impl Tunn {
         self.handshake.is_expired()
     }
 
-    pub fn dst_address(packet: &[u8]) -> Option<IpAddr> {
-        if packet.is_empty() {
-            return None;
-        }
-
-        match packet[0] >> 4 {
-            4 if packet.len() >= IPV4_MIN_HEADER_SIZE => {
-                let addr_bytes: [u8; IPV4_IP_SZ] = packet
-                    [IPV4_DST_IP_OFF..IPV4_DST_IP_OFF + IPV4_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                Some(IpAddr::from(addr_bytes))
-            }
-            6 if packet.len() >= IPV6_MIN_HEADER_SIZE => {
-                let addr_bytes: [u8; IPV6_IP_SZ] = packet
-                    [IPV6_DST_IP_OFF..IPV6_DST_IP_OFF + IPV6_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                Some(IpAddr::from(addr_bytes))
-            }
-            _ => None,
-        }
-    }
-
-    /// Create a new tunnel using own private key and the peer public key
-    #[deprecated(note = "Prefer `Tunn::new_at` to avoid time-impurity")]
-    pub fn new(
-        static_private: x25519::StaticSecret,
-        peer_static_public: x25519::PublicKey,
-        preshared_key: Option<[u8; 32]>,
-        persistent_keepalive: Option<u16>,
-        index: u32,
-        rate_limiter: Option<Arc<RateLimiter>>,
-    ) -> Self {
-        let now = Instant::now();
-        Self::new_at(
-            static_private,
-            peer_static_public,
-            preshared_key.map(x25519::StaticSecret::from),
-            persistent_keepalive,
-            Index::new_local(index),
-            rate_limiter,
-            rand::random(),
-            now,
-            now,
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap(),
-        )
-    }
-
     /// Create a new tunnel using own private key and the peer public key
     #[expect(clippy::too_many_arguments, reason = "We don't care that much.")]
     pub fn new_at(
@@ -253,11 +191,6 @@ impl Tunn {
             ),
             sessions: Default::default(),
             current: Default::default(),
-            tx_bytes: Default::default(),
-            rx_bytes: Default::default(),
-
-            #[cfg(feature = "packet-queue")]
-            packet_queue: VecDeque::new(),
             timers: Timers::new(persistent_keepalive, rate_limiter.is_none(), rng_seed, now),
 
             rate_limiter: rate_limiter.unwrap_or_else(|| {
@@ -276,42 +209,6 @@ impl Tunn {
 
     pub fn preshared_key(&self) -> &x25519::StaticSecret {
         self.handshake.preshared_key()
-    }
-
-    /// Update the private key and clear existing sessions
-    #[deprecated(note = "Prefer `Tunn::set_static_private_at` to avoid time-impurity")]
-    pub fn set_static_private(
-        &mut self,
-        static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
-        rate_limiter: Option<Arc<RateLimiter>>,
-    ) -> Result<(), WireGuardError> {
-        self.set_static_private_at(static_private, static_public, rate_limiter, Instant::now());
-
-        Ok(())
-    }
-
-    /// Update the private key and clear existing sessions
-    pub fn set_static_private_at(
-        &mut self,
-        static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
-        rate_limiter: Option<Arc<RateLimiter>>,
-        now: Instant,
-    ) {
-        self.timers.should_reset_rr = rate_limiter.is_none();
-        self.rate_limiter = rate_limiter.unwrap_or_else(|| {
-            Arc::new(RateLimiter::new_at(
-                &static_public,
-                PEER_HANDSHAKE_RATE_LIMIT,
-                now,
-            ))
-        });
-        self.handshake
-            .set_static_private(static_private, static_public);
-        for s in &mut self.sessions {
-            *s = None;
-        }
     }
 
     /// Set the `REKEY_ATTEMPT_TIME`.
@@ -336,54 +233,12 @@ impl Tunn {
         self.timers.set_rekey_timeout(rekey_timeout);
     }
 
-    /// Encapsulate a single packet from the tunnel interface.
-    /// Returns TunnResult.
-    ///
-    /// # Panics
-    /// Panics if dst buffer is too small.
-    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
-    #[cfg(feature = "packet-queue")]
-    #[deprecated(note = "Prefer `Tunn::encapsulate_at` to avoid time-impurity")]
-    pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.encapsulate_at(src, dst, Instant::now())
-    }
-
-    /// Encapsulate a single packet from the tunnel interface.
-    /// Returns TunnResult.
-    ///
-    /// On a packet for which there is no usable session yet, the packet is queued internally and a
-    /// handshake is initiated. Requires the `packet-queue` feature; without it, use the
-    /// side-effect-free [`Tunn::encapsulate_data_at`] and drive handshakes from the caller.
-    ///
-    /// # Panics
-    /// Panics if dst buffer is too small.
-    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
-    #[cfg(feature = "packet-queue")]
-    pub fn encapsulate_at<'a>(
-        &mut self,
-        src: &[u8],
-        dst: &'a mut [u8],
-        now: Instant,
-    ) -> TunnResult<'a> {
-        match self.encapsulate_data_at(src, dst, now) {
-            Ok(len) => TunnResult::WriteToNetwork(&mut dst[..len]),
-            Err(WireGuardError::NoCurrentSession) => {
-                // If there is no session, queue the packet for future retry
-                self.queue_packet(src);
-                // Initiate a new handshake if none is in progress
-                self.format_handshake_initiation_at(dst, false, now)
-            }
-            Err(e) => TunnResult::Err(e),
-        }
-    }
-
     /// Encapsulate a single packet from the tunnel interface **in place**, but only if
     /// there is currently a usable session.
     ///
     /// Returns `Ok(len)` when the encrypted WireGuard data message (`len` bytes) has been written
     /// to the start of `dst`. Returns `Err(WireGuardError::NoCurrentSession)` when there is no
-    /// usable session; in that case `dst` is left untouched and - unlike [`Tunn::encapsulate_at`] -
-    /// the packet is **not** queued and **no** handshake is initiated.
+    /// usable session; in that case `dst` is left untouched and **no** handshake is initiated.
     pub fn encapsulate_data_at(
         &mut self,
         src: &[u8],
@@ -406,33 +261,12 @@ impl Tunn {
         if !src.is_empty() {
             self.timer_tick(TimerName::TimeLastDataPacketSent, now);
         }
-        self.tx_bytes += src.len();
 
         Ok(len)
     }
 
     /// Receives a UDP datagram from the network and parses it.
     /// Returns TunnResult.
-    ///
-    /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
-    /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
-    /// packet is processed.
-    #[deprecated(note = "Prefer `Tunn::decapsulate_at` to avoid time-impurity")]
-    pub fn decapsulate<'a>(
-        &mut self,
-        src_addr: Option<IpAddr>,
-        datagram: &[u8],
-        dst: &'a mut [u8],
-    ) -> TunnResult<'a> {
-        self.decapsulate_at(src_addr, datagram, dst, Instant::now())
-    }
-
-    /// Receives a UDP datagram from the network and parses it.
-    /// Returns TunnResult.
-    ///
-    /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
-    /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
-    /// packet is processed.
     pub fn decapsulate_at<'a>(
         &mut self,
         src_addr: Option<IpAddr>,
@@ -440,13 +274,6 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> TunnResult<'a> {
-        // A repeated call is signalled by an empty datagram and drains the next queued packet.
-        // This only exists when the internal packet queue is compiled in.
-        #[cfg(feature = "packet-queue")]
-        if datagram.is_empty() {
-            return self.send_queued_packet(dst, now);
-        }
-
         let mut cookie = [0u8; COOKIE_REPLY_SZ];
         let packet = match self
             .rate_limiter
@@ -603,17 +430,6 @@ impl Tunn {
 
     /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
     /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
-    #[deprecated(note = "Prefer `Tunn::format_handshake_initiation_at` to avoid time-impurity")]
-    pub fn format_handshake_initiation<'a>(
-        &mut self,
-        dst: &'a mut [u8],
-        force_resend: bool,
-    ) -> TunnResult<'a> {
-        self.format_handshake_initiation_at(dst, force_resend, Instant::now())
-    }
-
-    /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
-    /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
     pub fn format_handshake_initiation_at<'a>(
         &mut self,
         dst: &'a mut [u8],
@@ -687,102 +503,10 @@ impl Tunn {
         }
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived, now);
-        self.rx_bytes += computed_len;
 
         match src_ip_address {
             IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..computed_len], addr),
             IpAddr::V6(addr) => TunnResult::WriteToTunnelV6(&mut packet[..computed_len], addr),
         }
-    }
-
-    /// Get a packet from the queue, and try to encapsulate it
-    #[cfg(feature = "packet-queue")]
-    fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8], now: Instant) -> TunnResult<'a> {
-        if let Some(packet) = self.dequeue_packet() {
-            match self.encapsulate_at(&packet, dst, now) {
-                TunnResult::Err(_) => {
-                    // On error, return packet to the queue
-                    self.requeue_packet(packet);
-                }
-                r => return r,
-            }
-        }
-        TunnResult::Done
-    }
-
-    /// Push packet to the back of the queue
-    #[cfg(feature = "packet-queue")]
-    fn queue_packet(&mut self, packet: &[u8]) {
-        if self.packet_queue.len() < MAX_QUEUE_DEPTH {
-            // Drop if too many are already in queue
-            self.packet_queue.push_back(packet.to_vec());
-        }
-    }
-
-    /// Push packet to the front of the queue
-    #[cfg(feature = "packet-queue")]
-    fn requeue_packet(&mut self, packet: Vec<u8>) {
-        if self.packet_queue.len() < MAX_QUEUE_DEPTH {
-            // Drop if too many are already in queue
-            self.packet_queue.push_front(packet);
-        }
-    }
-
-    #[cfg(feature = "packet-queue")]
-    fn dequeue_packet(&mut self) -> Option<Vec<u8>> {
-        self.packet_queue.pop_front()
-    }
-
-    fn estimate_loss(&self) -> f32 {
-        let session_idx = self.current;
-
-        let mut weight = 9.0;
-        let mut cur_avg = 0.0;
-        let mut total_weight = 0.0;
-
-        for i in 0..N_SESSIONS {
-            if let Some(ref session) = self.sessions[session_idx.wrapping_sub(i)] {
-                let (expected, received) = session.current_packet_cnt();
-
-                let loss = if expected == 0 {
-                    0.0
-                } else {
-                    1.0 - received as f32 / expected as f32
-                };
-
-                cur_avg += loss * weight;
-                total_weight += weight;
-                weight /= 3.0;
-            }
-        }
-
-        if total_weight == 0.0 {
-            0.0
-        } else {
-            cur_avg / total_weight
-        }
-    }
-
-    /// Return stats from the tunnel:
-    /// * Time since last handshake in seconds
-    /// * Data bytes sent
-    /// * Data bytes received
-    #[deprecated(note = "Prefer `Tunn::stats_at` to avoid time-impurity")]
-    pub fn stats(&self) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
-        self.stats_at(Instant::now())
-    }
-
-    /// Return stats from the tunnel:
-    /// * Time since last handshake in seconds
-    /// * Data bytes sent
-    /// * Data bytes received
-    pub fn stats_at(&self, now: Instant) -> (Option<Duration>, usize, usize, f32, Option<u32>) {
-        let time = self.time_since_last_handshake_at(now);
-        let tx_bytes = self.tx_bytes;
-        let rx_bytes = self.rx_bytes;
-        let loss = self.estimate_loss();
-        let rtt = self.handshake.last_rtt;
-
-        (time, tx_bytes, rx_bytes, loss, rtt)
     }
 }

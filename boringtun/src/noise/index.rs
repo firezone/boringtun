@@ -30,14 +30,6 @@ impl Index {
         Self(self.0)
     }
 
-    pub(crate) fn wrapping_sub(&self, value: u8) -> Self {
-        let index = self.0;
-        let idx8 = index as u8;
-        let result = (index & !0xff) | u32::from(idx8.wrapping_sub(value));
-
-        Self(result)
-    }
-
     pub(crate) fn to_le_bytes(self) -> [u8; 4] {
         self.0.to_le_bytes()
     }
@@ -46,7 +38,8 @@ impl Index {
         (self.0 >> 8) as usize
     }
 
-    pub fn session(&self) -> usize {
+    #[cfg(test)]
+    fn session(&self) -> usize {
         self.0 as u8 as usize
     }
 }

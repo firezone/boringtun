@@ -268,9 +268,6 @@ impl Tunn {
             *session = None;
         }
 
-        #[cfg(feature = "packet-queue")]
-        self.packet_queue.clear();
-
         self.timers.clear(now);
     }
 
@@ -324,11 +321,6 @@ impl Tunn {
         let (time_sent, local_index) = self.handshake.timer()?;
 
         Some((time_sent + self.timers.rekey_timeout, local_index))
-    }
-
-    #[deprecated(note = "Prefer `Timers::update_timers_at` to avoid time-impurity")]
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.update_timers_at(dst, Instant::now())
     }
 
     pub fn update_timers_at<'a>(&mut self, dst: &'a mut [u8], now: Instant) -> TunnResult<'a> {
@@ -601,26 +593,11 @@ impl Tunn {
         }
     }
 
-    #[deprecated(note = "Prefer `Tunn::time_since_last_handshake_at` to avoid time-impurity")]
-    pub fn time_since_last_handshake(&self) -> Option<Duration> {
-        self.time_since_last_handshake_at(Instant::now())
-    }
-
     pub fn time_since_last_handshake_at(&self, now: Instant) -> Option<Duration> {
         if self.sessions[self.current].is_some() {
             let session_established_at = self.timers[TimeSessionEstablished];
 
             Some(now.duration_since(session_established_at))
-        } else {
-            None
-        }
-    }
-
-    pub fn persistent_keepalive(&self) -> Option<u16> {
-        let keepalive = self.timers.persistent_keepalive;
-
-        if keepalive > 0 {
-            Some(keepalive as u16)
         } else {
             None
         }

@@ -250,7 +250,7 @@ struct NoiseParams {
     /// Static public key of the other party
     peer_static_public: x25519::PublicKey,
     /// A shared key = DH(static_private, peer_static_public)
-    static_shared: x25519::SharedSecret,
+    static_shared: x25519_dalek::SharedSecret,
     /// A pre-computation of HASH("mac1----", peer_static_public) for this peer
     sending_mac1_key: [u8; KEY_LEN],
     /// A preshared key.
@@ -276,7 +276,7 @@ struct HandshakeInitSentState {
     local_index: Index,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
-    ephemeral_private: x25519::ReusableSecret,
+    ephemeral_private: x25519_dalek::ReusableSecret,
     time_sent: Instant,
 }
 
@@ -302,7 +302,7 @@ enum HandshakeState {
     Expired,
 }
 
-pub struct Handshake {
+pub(crate) struct Handshake {
     params: NoiseParams,
     /// Index of the next session
     next_index: Index,
@@ -315,7 +315,6 @@ pub struct Handshake {
     last_handshake_timestamp: Tai64N,
     // TODO: make TimeStamper a singleton
     stamper: TimeStamper,
-    pub(super) last_rtt: Option<u32>,
 }
 
 #[derive(Default)]
@@ -333,7 +332,6 @@ struct WriteCookie {
 
 #[derive(Debug)]
 pub struct HalfHandshake {
-    pub peer_index: u32,
     pub peer_static_public: [u8; 32],
 }
 
@@ -342,7 +340,6 @@ pub fn parse_handshake_anon(
     static_public: &x25519::PublicKey,
     packet: &HandshakeInit,
 ) -> Result<HalfHandshake, WireGuardError> {
-    let peer_index = packet.sender_idx;
     // initiator.chaining_key = HASH(CONSTRUCTION)
     let mut chaining_key = INITIAL_CHAIN_KEY;
     // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
@@ -376,10 +373,7 @@ pub fn parse_handshake_anon(
         &hash,
     )?;
 
-    Ok(HalfHandshake {
-        peer_index,
-        peer_static_public,
-    })
+    Ok(HalfHandshake { peer_static_public })
 }
 
 impl NoiseParams {
@@ -402,22 +396,6 @@ impl NoiseParams {
             sending_mac1_key: initial_sending_mac_key,
             preshared_key: preshared_key.unwrap_or_else(|| x25519::StaticSecret::from([0u8; 32])),
         }
-    }
-
-    /// Set a new private key
-    fn set_static_private(
-        &mut self,
-        static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
-    ) {
-        // Check that the public key indeed matches the private key
-        let check_key = x25519::PublicKey::from(&static_private);
-        assert_eq!(check_key.as_bytes(), static_public.as_bytes());
-
-        self.static_private = static_private;
-        self.static_public = static_public;
-
-        self.static_shared = self.static_private.diffie_hellman(&self.peer_static_public);
     }
 }
 
@@ -446,7 +424,6 @@ impl Handshake {
             last_handshake_timestamp: Tai64N::zero(),
             stamper: TimeStamper::new(unix_instant, unix),
             cookies: Default::default(),
-            last_rtt: None,
         }
     }
 
@@ -488,14 +465,6 @@ impl Handshake {
 
     pub(crate) fn clear_cookie(&mut self) {
         self.cookies.write_cookie = None;
-    }
-
-    pub(crate) fn set_static_private(
-        &mut self,
-        private_key: x25519::StaticSecret,
-        public_key: x25519::PublicKey,
-    ) {
-        self.params.set_static_private(private_key, public_key)
     }
 
     pub(super) fn receive_handshake_initialization<'a>(
@@ -653,9 +622,6 @@ impl Handshake {
         let temp2 = b2s_hmac(&temp1, &[0x01]);
         let temp3 = b2s_hmac2(&temp1, &temp2, &[0x02]);
 
-        let rtt_time = now.duration_since(state.time_sent);
-        self.last_rtt = Some(rtt_time.as_millis() as u32);
-
         if is_previous {
             self.previous = HandshakeState::None;
         } else {
@@ -760,7 +726,7 @@ impl Handshake {
         let mut hash = INITIAL_CHAIN_HASH;
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random();
+        let ephemeral_private = x25519_dalek::ReusableSecret::random();
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         message_type.copy_from_slice(&super::HANDSHAKE_INIT.to_le_bytes());
@@ -842,7 +808,7 @@ impl Handshake {
         let (encrypted_nothing, _) = rest.split_at_mut(16);
 
         // responder.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random();
+        let ephemeral_private = x25519_dalek::ReusableSecret::random();
         let local_index = self.next_index.wrapping_increment();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }

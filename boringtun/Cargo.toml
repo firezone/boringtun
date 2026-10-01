@@ -12,13 +12,6 @@ repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.7.0/boringtun/"
 edition = "2021"
 
-[features]
-default = ["packet-queue"]
-# Compile in the internal pre-session packet queue and the `encapsulate`/`encapsulate_at`
-# entry-points that drive it. Disable (e.g. `default-features = false`) to build a leaner
-# `Tunn` whose only encapsulation path is the side-effect-free `encapsulate_data_at`.
-packet-queue = []
-
 [dependencies]
 parking_lot = "0.12"
 portable-atomic = { version = "1.13.1", features = ["fallback"] }

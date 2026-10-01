@@ -6,11 +6,7 @@ use std::fmt::Display;
 #[derive(Debug)]
 pub enum WireGuardError {
     DestinationBufferTooSmall,
-    #[deprecated = "Unused"]
-    IncorrectPacketLength,
     UnexpectedPacket,
-    #[deprecated = "Unused"]
-    WrongPacketType,
     WrongIndex,
     WrongKey,
     InvalidTai64nTimestamp,
@@ -21,15 +17,12 @@ pub enum WireGuardError {
     DuplicateCounter,
     InvalidPacket,
     NoCurrentSession,
-    #[deprecated = "Unused"]
-    LockFailed,
     ConnectionExpired,
     UnderLoad,
 }
 
 impl Display for WireGuardError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[expect(deprecated, reason = "We need to handle all cases.")]
         match self {
             WireGuardError::DestinationBufferTooSmall => {
                 write!(f, "the destination buffer is too small")
@@ -63,9 +56,6 @@ impl Display for WireGuardError {
             WireGuardError::NoCurrentSession => write!(f, "no active session"),
             WireGuardError::ConnectionExpired => write!(f, "connection is expired"),
             WireGuardError::UnderLoad => write!(f, "rate limit exceeded"),
-            WireGuardError::IncorrectPacketLength => Ok(()),
-            WireGuardError::WrongPacketType => Ok(()),
-            WireGuardError::LockFailed => Ok(()),
         }
     }
 }

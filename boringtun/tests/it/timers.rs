@@ -360,28 +360,6 @@ fn responder_keeps_sending_on_a_session_close_to_expiry() {
     assert_eq!(sim.take_inbox(A), [ip_packet]);
 }
 
-#[cfg(feature = "packet-queue")]
-#[test]
-fn sending_on_a_session_close_to_expiry_starts_a_new_handshake() {
-    let mut sim = Sim::connected();
-    let ip_packet = ipv4_packet(b"do not lose me");
-
-    sim.advance(SHOULD_NOT_USE_AFTER_TIME + secs(1));
-
-    let init = sim
-        .encapsulate_or_queue(A, &ip_packet)
-        .expect("a handshake initiation instead of a data message");
-    assert_eq!(crate::harness::classify(&init), Kind::Init);
-
-    sim.route(A, init);
-
-    assert_eq!(
-        sim.take_inbox(B),
-        [ip_packet],
-        "the packet survived the rekey"
-    );
-}
-
 /// Repeated rekeying rotates through the (eight-slot) session ring without
 /// dropping connectivity.
 #[test]

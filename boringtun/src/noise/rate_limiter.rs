@@ -49,23 +49,6 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    #[deprecated(note = "Prefer `RateLimiter::new_at` to avoid time-impurity")]
-    pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
-        let mut secret_key = [0u8; 16];
-        rand::rng().fill_bytes(&mut secret_key);
-        RateLimiter {
-            nonce_key: Self::rand_bytes(),
-            secret_key,
-            start_time: Instant::now(),
-            nonce_ctr: AtomicU64::new(0),
-            mac1_key: b2s_hash(LABEL_MAC1, public_key.as_bytes()),
-            cookie_key: b2s_hash(LABEL_COOKIE, public_key.as_bytes()).into(),
-            limit,
-            count: AtomicU64::new(0),
-            last_reset: Mutex::new(Instant::now()),
-        }
-    }
-
     pub fn new_at(public_key: &crate::x25519::PublicKey, limit: u64, now: Instant) -> Self {
         let mut secret_key = [0u8; 16];
         rand::rng().fill_bytes(&mut secret_key);
@@ -89,13 +72,7 @@ impl RateLimiter {
     }
 
     /// Reset packet count (ideally should be called with a period of 1 second)
-    #[deprecated(note = "Prefer `RateLimiter::reset_count_at` to avoid time-impurity")]
-    pub fn reset_count(&self) {
-        self.reset_count_at(Instant::now())
-    }
-
-    /// Reset packet count (ideally should be called with a period of 1 second)
-    pub fn reset_count_at(&self, current_time: Instant) {
+    pub(crate) fn reset_count_at(&self, current_time: Instant) {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
         let mut last_reset_time = self.last_reset.lock();
         if current_time.duration_since(*last_reset_time).as_secs() >= RESET_PERIOD {
@@ -172,18 +149,7 @@ impl RateLimiter {
     }
 
     /// Verify the MAC fields on the datagram, and apply rate limiting if needed
-    #[deprecated(note = "Prefer `RateLimiter::verify_packet_at` to avoid time-impurity")]
-    pub fn verify_packet<'a, 'b>(
-        &self,
-        src_addr: Option<IpAddr>,
-        src: &'a [u8],
-        dst: &'b mut [u8],
-    ) -> Result<Packet<'a>, TunnResult<'b>> {
-        self.verify_packet_at(src_addr, src, dst, Instant::now())
-    }
-
-    /// Verify the MAC fields on the datagram, and apply rate limiting if needed
-    pub fn verify_packet_at<'a, 'b>(
+    pub(crate) fn verify_packet_at<'a, 'b>(
         &self,
         src_addr: Option<IpAddr>,
         src: &'a [u8],

@@ -498,20 +498,6 @@ impl Sim {
             TunnResult::WriteToTunnelV6(packet, _) => outs.push(Out::Ip(packet.to_vec())),
             TunnResult::WriteToNetwork(packet) => {
                 outs.push(Out::Net(packet.to_vec()));
-
-                // Per the `decapsulate_at` contract, keep calling with an
-                // empty datagram to flush packets queued while no session
-                // existed. The queue only exists with the `packet-queue`
-                // feature.
-                #[cfg(feature = "packet-queue")]
-                loop {
-                    let mut buf = vec![0u8; BUF];
-                    match node.tunn.decapsulate_at(None, &[], &mut buf, now) {
-                        TunnResult::Done => break,
-                        TunnResult::WriteToNetwork(packet) => outs.push(Out::Net(packet.to_vec())),
-                        other => panic!("unexpected result while flushing queue: {other:?}"),
-                    }
-                }
             }
         }
 
@@ -586,23 +572,6 @@ impl Sim {
             .encapsulate_data_at(ip_packet, &mut buf, now)?;
         buf.truncate(len);
         Ok(buf)
-    }
-
-    /// Encrypt an IP packet if a session exists; otherwise queue it internally
-    /// and return the handshake initiation that takes its place on the wire.
-    #[cfg(feature = "packet-queue")]
-    pub fn encapsulate_or_queue(&mut self, from: Peer, ip_packet: &[u8]) -> Option<Vec<u8>> {
-        let now = self.now;
-        let mut buf = vec![0u8; BUF];
-        match self
-            .node_mut(from)
-            .tunn
-            .encapsulate_at(ip_packet, &mut buf, now)
-        {
-            TunnResult::WriteToNetwork(packet) => Some(packet.to_vec()),
-            TunnResult::Done => None,
-            other => panic!("unexpected result from encapsulate_at: {other:?}"),
-        }
     }
 
     /// Encrypt an IP packet and route it through the network.

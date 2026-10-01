@@ -11,8 +11,8 @@
 //! - §6.1-§6.5: timers, keepalives and passive stealth (`timers`)
 //!
 //! Behaviour specific to the sans-IO design - explicit time injection,
-//! `next_timer_update`, jittered handshake scheduling and the internal packet
-//! queue - is covered in `sans_io`.
+//! `next_timer_update` and jittered handshake scheduling - is covered in
+//! `sans_io`.
 
 mod cookies;
 mod data;
