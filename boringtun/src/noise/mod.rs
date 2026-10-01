@@ -465,7 +465,7 @@ impl Tunn {
             .as_mut()
             .filter(|s| s.receiving_index == remote_idx)
         else {
-            tracing::trace!(%remote_idx, "Session expired during decryption");
+            tracing::trace!(%remote_idx, "Session was replaced during decryption");
             return TunnResult::Err(WireGuardError::NoCurrentSession);
         };
         let len = match session.finish_receive_packet_data(opened) {
