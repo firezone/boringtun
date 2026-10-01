@@ -6,7 +6,7 @@
 //! WireGuard whitepaper (<https://www.wireguard.com/papers/wireguard.pdf>):
 //!
 //! - §5.3: cookies and DoS mitigation (`cookies`)
-//! - §5.4: protocol messages (`handshake`, `data`)
+//! - §5.4: protocol messages (`handshake`, `data`, `deferred`)
 //! - §5.4.6, §6.4: nonce-based replay protection (`replay`)
 //! - §6.1-§6.5: timers, keepalives and passive stealth (`timers`)
 //!
@@ -16,6 +16,7 @@
 
 mod cookies;
 mod data;
+mod deferred;
 mod handshake;
 mod harness;
 mod replay;

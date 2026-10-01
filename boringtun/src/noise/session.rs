@@ -224,6 +224,17 @@ impl Session {
         src: &[u8],
         dst: &'a mut [u8],
     ) -> Result<&'a mut [u8], WireGuardError> {
+        let len = self.prepare_packet_data(src, dst)?.seal(dst);
+
+        Ok(&mut dst[..len])
+    }
+
+    /// Writes the header and plaintext of a data message to `dst`, deferring the encryption.
+    pub(super) fn prepare_packet_data(
+        &mut self,
+        src: &[u8],
+        dst: &mut [u8],
+    ) -> Result<PendingSeal, WireGuardError> {
         let buf_len = dst.len();
         let num_required = src.len() + super::DATA_OVERHEAD_SZ;
 
@@ -245,24 +256,13 @@ impl Session {
         counter.copy_from_slice(&sending_key_counter.to_le_bytes());
 
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
-        let n = {
-            let mut nonce = [0u8; 12];
-            nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
-            data[..src.len()].copy_from_slice(src);
-            self.sender
-                .seal_in_place_separate_tag(
-                    Nonce::assume_unique_for_key(nonce),
-                    Aad::from(&[]),
-                    &mut data[..src.len()],
-                )
-                .map(|tag| {
-                    data[src.len()..src.len() + AEAD_SIZE].copy_from_slice(tag.as_ref());
-                    src.len() + AEAD_SIZE
-                })
-                .unwrap()
-        };
+        data[..src.len()].copy_from_slice(src);
 
-        Ok(&mut dst[..DATA_OFFSET + n])
+        Ok(PendingSeal {
+            key: self.sender.clone(),
+            counter: sending_key_counter,
+            plaintext_len: src.len(),
+        })
     }
 
     /// packet - a data packet we received from the network
@@ -312,5 +312,50 @@ impl Session {
             self.receiving_key_counter.next,
             self.receiving_key_counter.receive_cnt,
         )
+    }
+}
+
+/// The encryption of a data message whose header and plaintext are already in place.
+///
+/// The nonce is fixed when the [`PendingSeal`] is created, so seals may run in any order and on
+/// any thread: the receiver's sliding replay window accepts data messages that arrive out of order.
+/// Until [`PendingSeal::seal`] runs, the buffer holds the plaintext and must not be sent.
+#[must_use = "the data message is not encrypted until it is sealed"]
+pub struct PendingSeal {
+    key: LessSafeKey,
+    counter: u64,
+    plaintext_len: usize,
+}
+
+impl PendingSeal {
+    /// Returns the length of the sealed data message.
+    pub fn message_len(&self) -> usize {
+        DATA_OFFSET + self.plaintext_len + AEAD_SIZE
+    }
+
+    /// Encrypts the data message in `message` in place and returns its length.
+    ///
+    /// `message` must start where the [`PendingSeal`] wrote the data message.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `message` is shorter than [`PendingSeal::message_len`].
+    pub fn seal(self, message: &mut [u8]) -> usize {
+        let (plaintext, tag) =
+            message[DATA_OFFSET..self.message_len()].split_at_mut(self.plaintext_len);
+
+        let mut nonce = [0u8; 12];
+        nonce[4..12].copy_from_slice(&self.counter.to_le_bytes());
+        let computed_tag = self
+            .key
+            .seal_in_place_separate_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&[]),
+                plaintext,
+            )
+            .expect("plaintext of a data message is always within the AEAD's limits");
+        tag.copy_from_slice(computed_tag.as_ref());
+
+        self.message_len()
     }
 }

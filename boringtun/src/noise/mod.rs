@@ -10,6 +10,7 @@ mod session;
 mod timers;
 
 pub use index::Index;
+pub use session::PendingSeal;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
@@ -390,6 +391,21 @@ impl Tunn {
         dst: &mut [u8],
         now: Instant,
     ) -> Result<usize, WireGuardError> {
+        let len = self.encapsulate_data_deferred_at(src, dst, now)?.seal(dst);
+
+        Ok(len)
+    }
+
+    /// Like [`Tunn::encapsulate_data_at`] but defers the encryption to the returned [`PendingSeal`].
+    ///
+    /// All state of the [`Tunn`] is updated immediately; only the AEAD seal is left to the caller,
+    /// which may run it on another thread. `dst` holds the header and the plaintext until then.
+    pub fn encapsulate_data_deferred_at(
+        &mut self,
+        src: &[u8],
+        dst: &mut [u8],
+        now: Instant,
+    ) -> Result<PendingSeal, WireGuardError> {
         let is_responder = self.timers.is_responder();
         let Some(session) = self.sessions[self.current]
             .as_mut()
@@ -399,7 +415,7 @@ impl Tunn {
         };
 
         // Send the packet using an established session
-        let len = session.format_packet_data(src, dst)?.len();
+        let seal = session.prepare_packet_data(src, dst)?;
 
         self.timer_tick(TimerName::TimeLastPacketSent, now);
         // Exclude Keepalive packets from timer update.
@@ -408,7 +424,7 @@ impl Tunn {
         }
         self.tx_bytes += src.len();
 
-        Ok(len)
+        Ok(seal)
     }
 
     /// Receives a UDP datagram from the network and parses it.
