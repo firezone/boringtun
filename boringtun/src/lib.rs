@@ -5,17 +5,7 @@
 //!
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
 
-#[cfg(feature = "device")]
-pub mod device;
-
-#[cfg(feature = "ffi-bindings")]
-pub mod ffi;
-#[cfg(feature = "jni-bindings")]
-pub mod jni;
 pub mod noise;
-
-#[cfg(any(feature = "ffi-bindings", feature = "device"))]
-pub(crate) mod serialization;
 
 /// Re-export of the x25519 types
 pub mod x25519 {

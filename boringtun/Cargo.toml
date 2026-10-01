@@ -14,30 +14,15 @@ edition = "2021"
 
 [features]
 default = ["packet-queue"]
-device = ["packet-queue", "socket2", "thiserror", "dep:nix", "dep:base64", "dep:hex", "dep:libc", "dep:ip_network", "dep:ip_network_table"]
-jni-bindings = ["ffi-bindings", "jni"]
-ffi-bindings = ["packet-queue", "tracing-subscriber", "dep:base64", "dep:hex", "dep:libc"]
 # Compile in the internal pre-session packet queue and the `encapsulate`/`encapsulate_at`
 # entry-points that drive it. Disable (e.g. `default-features = false`) to build a leaner
 # `Tunn` whose only encapsulation path is the side-effect-free `encapsulate_data_at`.
 packet-queue = []
-mock-instant = ["mock_instant"]                  # Deprecated.
-mock_instant = []                                # Deprecated.
-thiserror = ["dep:thiserror"]                    # Deprecated.
-tracing-subscriber = ["dep:tracing-subscriber"]  # Deprecated.
-jni = ["dep:jni"]                                # Deprecated.
-socket2 = ["dep:socket2"]                        # Deprecated.
 
 [dependencies]
-base64 = { version = "0.23", optional = true }
-hex = { version = "0.4", optional = true }
-libc = { version = "0.2", optional = true }
 parking_lot = "0.12"
 portable-atomic = { version = "1.13.1", features = ["fallback"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3", features = ["fmt"], optional = true }
-ip_network = { version = "0.4.1", optional = true }
-ip_network_table = { version = "0.2.0", optional = true }
 ring = "0.17"
 x25519-dalek = { version = "3.0.0", features = [
     "reusable_secrets",
@@ -50,24 +35,11 @@ aead = "0.5.2"
 blake2 = "0.11.0"
 hmac = "0.13"
 typenum = "1.20.1"
-jni = { version = "0.19.0", optional = true }
-socket2 = { version = "0.6.4", features = ["all"], optional = true }
-thiserror = { version = "2", optional = true }
 constant_time_eq = "0.6.0"
-
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", optional = true, default-features = false, features = [
-    "time",
-    "user",
-] }
 
 [dev-dependencies]
 etherparse = "0.21"
-tracing-subscriber = "0.3"
 criterion = { version = "0.8.2", features = ["html_reports"] }
-
-[lib]
-crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bench]]
 name = "crypto_benches"
