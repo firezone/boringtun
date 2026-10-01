@@ -15,8 +15,8 @@ pub struct Session {
     established_at: Instant,
     pub(crate) receiving_index: Index,
     sending_index: Index,
-    receiver: Arc<LessSafeKey>,
-    sender: Arc<LessSafeKey>,
+    receiver: Arc<Key>,
+    sender: Arc<Key>,
     sending_key_counter: u64,
     receiving_key_counter: ReceivingKeyCounterValidator,
 }
@@ -178,12 +178,12 @@ impl Session {
             established_at: now,
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: Arc::new(LessSafeKey::new(
+            receiver: Arc::new(Key(LessSafeKey::new(
                 UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
-            )),
-            sender: Arc::new(LessSafeKey::new(
+            ))),
+            sender: Arc::new(Key(LessSafeKey::new(
                 UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap(),
-            )),
+            ))),
             sending_key_counter: 0,
             receiving_key_counter: Default::default(),
         }
@@ -279,7 +279,7 @@ impl Session {
 /// any thread: the receiver's sliding replay window accepts data messages that arrive out of order.
 #[must_use = "the data message is not sent until it is sealed"]
 pub struct PendingSeal {
-    key: Arc<LessSafeKey>,
+    key: Arc<Key>,
     receiver_index: Index,
     counter: u64,
 }
@@ -311,6 +311,7 @@ impl PendingSeal {
         nonce[4..12].copy_from_slice(&self.counter.to_le_bytes());
         let computed_tag = self
             .key
+            .0
             .seal_in_place_separate_tag(Nonce::assume_unique_for_key(nonce), Aad::from(&[]), data)
             .expect("plaintext of a data message is always within the AEAD's limits");
         tag.copy_from_slice(computed_tag.as_ref());
@@ -326,7 +327,7 @@ impl PendingSeal {
 /// to authenticate never advances the replay window.
 #[must_use = "the data message is not decrypted until it is opened"]
 pub struct PendingOpen {
-    key: Arc<LessSafeKey>,
+    key: Arc<Key>,
     receiving_index: Index,
     counter: u64,
 }
@@ -349,6 +350,7 @@ impl PendingOpen {
             receiving_index: self.receiving_index,
             counter: self.counter,
             plaintext_len,
+            _key: self.key,
         }
     }
 
@@ -367,6 +369,7 @@ impl PendingOpen {
         nonce[4..12].copy_from_slice(&self.counter.to_le_bytes());
         let plaintext = self
             .key
+            .0
             .open_in_place(Nonce::assume_unique_for_key(nonce), Aad::from(&[]), buf)
             .map_err(|_| WireGuardError::InvalidAeadTag)?;
 
@@ -380,4 +383,13 @@ pub struct Opened {
     pub(super) receiving_index: Index,
     counter: u64,
     plaintext_len: Result<usize, WireGuardError>,
+    /// Released when the [`Tunn`](super::Tunn) accepts the message, so that the reference count
+    /// of the key is only ever written by the thread that owns the [`Tunn`](super::Tunn).
+    _key: Arc<Key>,
 }
+
+/// A session key on a cache line of its own, apart from the reference count of its [`Arc`].
+///
+/// Threads that only read the key then never contend with the thread updating the count.
+#[repr(align(128))]
+struct Key(LessSafeKey);
