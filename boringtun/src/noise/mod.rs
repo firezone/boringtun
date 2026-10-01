@@ -443,16 +443,15 @@ impl Tunn {
             .filter(|s| s.should_use_at(now) || is_responder)
     }
 
-    /// Prepares the decryption of a data message into `dst`, deferring it to the returned
-    /// [`PendingOpen`].
+    /// Prepares the decryption of a data message, deferring it to the returned [`PendingOpen`].
     ///
     /// Selects the session and checks the counter against the replay window without updating
-    /// any state. Hand the [`Opened`] message back to [`Tunn::finish_decapsulate_data_at`] to
-    /// complete the decapsulation; [`Tunn::decapsulate_at`] does all three steps at once.
+    /// any state or reading the ciphertext. Hand the [`Opened`] message back to
+    /// [`Tunn::finish_decapsulate_data_at`] to complete the decapsulation;
+    /// [`Tunn::decapsulate_at`] does all three steps at once.
     pub fn decapsulate_data_deferred(
         &self,
         packet: PacketData,
-        dst: &mut [u8],
     ) -> Result<PendingOpen, WireGuardError> {
         let remote_idx = Index::from_peer(packet.receiver_idx);
 
@@ -460,7 +459,7 @@ impl Tunn {
             tracing::trace!(%remote_idx, "No current session available");
             WireGuardError::NoCurrentSession
         })?;
-        let open = session.prepare_receive_packet_data(packet, dst)?;
+        let open = session.prepare_receive_packet_data(packet)?;
 
         Ok(open)
     }
@@ -664,7 +663,10 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let opened = self.decapsulate_data_deferred(packet, dst)?.open(dst);
+        let ciphertext = packet.encrypted_encapsulated_packet;
+        let opened = self
+            .decapsulate_data_deferred(packet)?
+            .open_into(ciphertext, dst);
 
         Ok(self.finish_decapsulate_data_at(opened, dst, now))
     }

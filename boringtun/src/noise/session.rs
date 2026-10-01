@@ -231,33 +231,21 @@ impl Session {
         }
     }
 
-    /// Copies the ciphertext of a data message to `dst`, deferring the decryption.
+    /// Checks the counter of a data message, deferring its decryption.
     pub(super) fn prepare_receive_packet_data(
         &self,
         packet: PacketData,
-        dst: &mut [u8],
     ) -> Result<PendingOpen, WireGuardError> {
-        let ct_len = packet.encrypted_encapsulated_packet.len();
-        let buf_len = dst.len();
-
-        if buf_len < ct_len {
-            tracing::warn!(%buf_len, %ct_len, "Destination buffer too small for incoming packet data");
-
-            return Err(WireGuardError::DestinationBufferTooSmall);
-        }
         if packet.receiver_idx != self.receiving_index {
             return Err(WireGuardError::WrongIndex);
         }
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(packet.counter)?;
 
-        dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
-
         Ok(PendingOpen {
             key: Arc::clone(&self.receiver),
             receiving_index: self.receiving_index,
             counter: packet.counter,
-            ciphertext_len: ct_len,
         })
     }
 
@@ -331,7 +319,7 @@ impl PendingSeal {
     }
 }
 
-/// The decryption of a data message whose ciphertext has been copied into a buffer.
+/// The decryption of a data message whose counter has been checked.
 ///
 /// Its counter has passed the replay check but is not yet marked as received: that only happens
 /// once the decrypted message is handed back to the [`Tunn`](super::Tunn), so a message that fails
@@ -341,29 +329,15 @@ pub struct PendingOpen {
     key: Arc<LessSafeKey>,
     receiving_index: Index,
     counter: u64,
-    ciphertext_len: usize,
 }
 
 impl PendingOpen {
-    /// Decrypts the data message in `buf` in place.
+    /// Copies `ciphertext` to the start of `dst` and decrypts it in place.
     ///
-    /// `buf` must start with the ciphertext copied there by the [`PendingOpen`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if `buf` is shorter than the ciphertext.
-    pub fn open(self, buf: &mut [u8]) -> Opened {
-        let mut nonce = [0u8; 12];
-        nonce[4..12].copy_from_slice(&self.counter.to_le_bytes());
-        let plaintext_len = self
-            .key
-            .open_in_place(
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(&[]),
-                &mut buf[..self.ciphertext_len],
-            )
-            .map(|plaintext| plaintext.len())
-            .map_err(|_| WireGuardError::InvalidAeadTag);
+    /// `ciphertext` is the encrypted part of the data message this [`PendingOpen`] was
+    /// prepared from; anything else fails to authenticate.
+    pub fn open_into(self, ciphertext: &[u8], dst: &mut [u8]) -> Opened {
+        let plaintext_len = self.decrypt(ciphertext, dst);
 
         Opened {
             receiving_index: self.receiving_index,
@@ -371,9 +345,30 @@ impl PendingOpen {
             plaintext_len,
         }
     }
+
+    fn decrypt(&self, ciphertext: &[u8], dst: &mut [u8]) -> Result<usize, WireGuardError> {
+        let ct_len = ciphertext.len();
+        let buf_len = dst.len();
+
+        let Some(buf) = dst.get_mut(..ct_len) else {
+            tracing::warn!(%buf_len, %ct_len, "Destination buffer too small for incoming packet data");
+
+            return Err(WireGuardError::DestinationBufferTooSmall);
+        };
+        buf.copy_from_slice(ciphertext);
+
+        let mut nonce = [0u8; 12];
+        nonce[4..12].copy_from_slice(&self.counter.to_le_bytes());
+        let plaintext = self
+            .key
+            .open_in_place(Nonce::assume_unique_for_key(nonce), Aad::from(&[]), buf)
+            .map_err(|_| WireGuardError::InvalidAeadTag)?;
+
+        Ok(plaintext.len())
+    }
 }
 
-/// A data message decrypted by [`PendingOpen::open`], to be handed back to the [`Tunn`](super::Tunn).
+/// A data message decrypted by [`PendingOpen::open_into`], to be handed back to the [`Tunn`](super::Tunn).
 #[must_use = "the data message is not accepted until it is handed back to the `Tunn`"]
 pub struct Opened {
     pub(super) receiving_index: Index,
