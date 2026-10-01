@@ -332,11 +332,17 @@ pub struct PendingOpen {
 }
 
 impl PendingOpen {
-    /// Copies `ciphertext` to the start of `dst` and decrypts it in place.
+    /// Copies the ciphertext of `message` to the start of `dst` and decrypts it in place.
     ///
-    /// `ciphertext` is the encrypted part of the data message this [`PendingOpen`] was
-    /// prepared from; anything else fails to authenticate.
-    pub fn open_into(self, ciphertext: &[u8], dst: &mut [u8]) -> Opened {
+    /// `message` is the data message this [`PendingOpen`] was prepared from; anything else fails
+    /// to authenticate.
+    pub fn open_into(self, message: &[u8], dst: &mut [u8]) -> Opened {
+        let ciphertext = message.get(DATA_OFFSET..).unwrap_or_default();
+
+        self.open_ciphertext_into(ciphertext, dst)
+    }
+
+    pub(super) fn open_ciphertext_into(self, ciphertext: &[u8], dst: &mut [u8]) -> Opened {
         let plaintext_len = self.decrypt(ciphertext, dst);
 
         Opened {

@@ -74,7 +74,7 @@ fn deferred_open_matches_the_eager_path() {
     let mut buf = vec![0u8; BUF];
     let opened = prepare_open(sim.tunn_mut(B), &deferred)
         .unwrap()
-        .open_into(ciphertext(&deferred), &mut buf);
+        .open_into(&deferred, &mut buf);
     let deferred = finish_open(sim.tunn_mut(B), opened, &mut buf, now);
 
     assert_eq!(deferred.unwrap(), eager);
@@ -92,8 +92,8 @@ fn duplicate_within_one_batch_is_accepted_only_once() {
     let mut second_buf = vec![0u8; BUF];
     let first = prepare_open(tunn, &datagram).unwrap();
     let second = prepare_open(tunn, &datagram).unwrap();
-    let first = first.open_into(ciphertext(&datagram), &mut first_buf);
-    let second = second.open_into(ciphertext(&datagram), &mut second_buf);
+    let first = first.open_into(&datagram, &mut first_buf);
+    let second = second.open_into(&datagram, &mut second_buf);
 
     assert_eq!(
         finish_open(tunn, first, &mut first_buf, now).unwrap(),
@@ -119,7 +119,7 @@ fn tampered_packet_does_not_advance_the_replay_window() {
     let mut buf = vec![0u8; BUF];
     let opened = prepare_open(sim.tunn_mut(B), &tampered)
         .unwrap()
-        .open_into(ciphertext(&tampered), &mut buf);
+        .open_into(&tampered, &mut buf);
     let result = finish_open(sim.tunn_mut(B), opened, &mut buf, now);
 
     assert!(matches!(result, Err(WireGuardError::InvalidAeadTag)));
@@ -167,8 +167,4 @@ fn finish_open(
 
 fn counter(datagram: &[u8]) -> u64 {
     u64::from_le_bytes(datagram[8..16].try_into().unwrap())
-}
-
-fn ciphertext(datagram: &[u8]) -> &[u8] {
-    &datagram[16..]
 }

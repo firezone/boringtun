@@ -666,7 +666,7 @@ impl Tunn {
         let ciphertext = packet.encrypted_encapsulated_packet;
         let opened = self
             .decapsulate_data_deferred(packet)?
-            .open_into(ciphertext, dst);
+            .open_ciphertext_into(ciphertext, dst);
 
         Ok(self.finish_decapsulate_data_at(opened, dst, now))
     }
