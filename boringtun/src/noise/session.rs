@@ -216,19 +216,6 @@ impl Session {
         ret
     }
 
-    /// src - an IP packet from the interface
-    /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
-    /// returns the size of the formatted packet
-    pub(super) fn format_packet_data<'a>(
-        &mut self,
-        src: &[u8],
-        dst: &'a mut [u8],
-    ) -> Result<&'a mut [u8], WireGuardError> {
-        let len = self.prepare_packet_data(src, dst)?.seal(dst);
-
-        Ok(&mut dst[..len])
-    }
-
     /// Writes the header and plaintext of a data message to `dst`, deferring the encryption.
     pub(super) fn prepare_packet_data(
         &mut self,

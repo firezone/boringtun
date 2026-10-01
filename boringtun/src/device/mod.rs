@@ -559,23 +559,36 @@ impl Device {
                         None => continue,
                     };
 
-                    match p.update_timers(&mut t.dst_buf[..]) {
-                        TunnResult::Done => {}
+                    let packet = match p.update_timers(&mut t.dst_buf[..]) {
+                        TunnResult::Done => continue,
                         TunnResult::Err(WireGuardError::ConnectionExpired) => {
                             p.shutdown_endpoint(); // close open udp socket
+                            continue;
                         }
-                        TunnResult::Err(error) => tracing::error!(?error, "Timer error"),
-                        TunnResult::WriteToNetwork(packet) => {
-                            match endpoint_addr {
-                                SocketAddr::V4(_) => {
-                                    udp4.send_to(packet, &endpoint_addr.into()).ok()
+                        TunnResult::Err(error) => {
+                            tracing::error!(?error, "Timer error");
+                            continue;
+                        }
+                        TunnResult::WriteToNetwork(packet) => packet,
+                        TunnResult::KeepaliveDue => {
+                            match p.tunnel.encapsulate_data_at(
+                                &[],
+                                &mut t.dst_buf[..],
+                                Instant::now(),
+                            ) {
+                                Ok(len) => &mut t.dst_buf[..len],
+                                Err(error) => {
+                                    tracing::error!(?error, "Keepalive error");
+                                    continue;
                                 }
-                                SocketAddr::V6(_) => {
-                                    udp6.send_to(packet, &endpoint_addr.into()).ok()
-                                }
-                            };
+                            }
                         }
                         _ => panic!("Unexpected result from update_timers"),
+                    };
+
+                    match endpoint_addr {
+                        SocketAddr::V4(_) => udp4.send_to(packet, &endpoint_addr.into()).ok(),
+                        SocketAddr::V6(_) => udp6.send_to(packet, &endpoint_addr.into()).ok(),
                     };
                 }
                 Action::Continue
@@ -666,6 +679,16 @@ impl Device {
                             flush = true;
                             let _: Result<_, _> = udp.send_to(packet, &addr);
                         }
+                        TunnResult::KeepaliveDue => {
+                            if let Ok(len) = p.tunnel.encapsulate_data_at(
+                                &[],
+                                &mut t.dst_buf[..],
+                                Instant::now(),
+                            ) {
+                                flush = true;
+                                let _: Result<_, _> = udp.send_to(&t.dst_buf[..len], &addr);
+                            }
+                        }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if p.is_allowed_ip(addr) {
                                 t.iface.write4(packet);
@@ -744,6 +767,16 @@ impl Device {
                         TunnResult::WriteToNetwork(packet) => {
                             flush = true;
                             let _: Result<_, _> = udp.send(packet);
+                        }
+                        TunnResult::KeepaliveDue => {
+                            if let Ok(len) = p.tunnel.encapsulate_data_at(
+                                &[],
+                                &mut t.dst_buf[..],
+                                Instant::now(),
+                            ) {
+                                flush = true;
+                                let _: Result<_, _> = udp.send(&t.dst_buf[..len]);
+                            }
                         }
                         TunnResult::WriteToTunnelV4(packet, addr) => {
                             if p.is_allowed_ip(addr) {

@@ -120,6 +120,24 @@ fn tampered_packet_does_not_advance_the_replay_window() {
     assert_eq!(sim.deliver(B, &datagrams[0]).expect_one_ip(), ip_packet);
 }
 
+#[test]
+fn handshake_response_leaves_the_keepalive_to_the_caller() {
+    let mut sim = Sim::new();
+    let init = sim.initiate_handshake(A);
+    let response = sim.deliver(B, &init).expect_one_net();
+    let now = sim.now;
+
+    let mut buf = vec![0u8; BUF];
+    let result = sim
+        .tunn_mut(A)
+        .decapsulate_at(None, &response, &mut buf, now);
+    assert!(matches!(result, TunnResult::KeepaliveDue));
+
+    let keepalive = sim.encapsulate(A, &[]);
+    sim.deliver(B, &keepalive).expect_consumed();
+    sim.assert_connectivity();
+}
+
 fn prepare_open(
     tunn: &mut Tunn,
     datagram: &[u8],

@@ -67,10 +67,12 @@ fn next_timer_update_predicts_the_passive_keepalive() {
         tunn.update_timers_at(&mut buf, wake - Duration::from_millis(1)),
         TunnResult::Done
     ));
-    let TunnResult::WriteToNetwork(packet) = tunn.update_timers_at(&mut buf, wake) else {
-        panic!("expected the keepalive");
-    };
-    assert_eq!(packet.len(), KEEPALIVE_SIZE);
+    assert!(matches!(
+        tunn.update_timers_at(&mut buf, wake),
+        TunnResult::KeepaliveDue
+    ));
+    let len = tunn.encapsulate_data_at(&[], &mut buf, wake).unwrap();
+    assert_eq!(len, KEEPALIVE_SIZE);
 
     // The passive keepalive has been answered, so it must not re-arm; the only
     // thing left on the clock is the eventual session expiry.

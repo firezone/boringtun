@@ -430,6 +430,7 @@ impl Sim {
                 None
             }
             TunnResult::WriteToNetwork(packet) => Some(packet.to_vec()),
+            TunnResult::KeepaliveDue => Some(self.encapsulate(peer, &[])),
             other => panic!("unexpected result from update_timers_at: {other:?}"),
         };
 
@@ -492,25 +493,31 @@ impl Sim {
 
         let mut buf = vec![0u8; BUF];
         match node.tunn.decapsulate_at(src, datagram, &mut buf, now) {
-            TunnResult::Done => {}
+            TunnResult::Done => return outs,
             TunnResult::Err(e) => outs.push(Out::Err(e)),
             TunnResult::WriteToTunnelV4(packet, _) => outs.push(Out::Ip(packet.to_vec())),
             TunnResult::WriteToTunnelV6(packet, _) => outs.push(Out::Ip(packet.to_vec())),
-            TunnResult::WriteToNetwork(packet) => {
-                outs.push(Out::Net(packet.to_vec()));
+            TunnResult::WriteToNetwork(packet) => outs.push(Out::Net(packet.to_vec())),
+            TunnResult::KeepaliveDue => {
+                let len = node
+                    .tunn
+                    .encapsulate_data_at(&[], &mut buf, now)
+                    .expect("a keepalive is only due on a usable session");
+                outs.push(Out::Net(buf[..len].to_vec()));
+            }
+        }
 
-                // Per the `decapsulate_at` contract, keep calling with an
-                // empty datagram to flush packets queued while no session
-                // existed. The queue only exists with the `packet-queue`
-                // feature.
-                #[cfg(feature = "packet-queue")]
-                loop {
-                    let mut buf = vec![0u8; BUF];
-                    match node.tunn.decapsulate_at(None, &[], &mut buf, now) {
-                        TunnResult::Done => break,
-                        TunnResult::WriteToNetwork(packet) => outs.push(Out::Net(packet.to_vec())),
-                        other => panic!("unexpected result while flushing queue: {other:?}"),
-                    }
+        // Per the `decapsulate_at` contract, keep calling with an empty
+        // datagram to flush packets queued while no session existed. The
+        // queue only exists with the `packet-queue` feature.
+        #[cfg(feature = "packet-queue")]
+        if matches!(outs.last(), Some(Out::Net(_))) {
+            loop {
+                let mut buf = vec![0u8; BUF];
+                match node.tunn.decapsulate_at(None, &[], &mut buf, now) {
+                    TunnResult::Done => break,
+                    TunnResult::WriteToNetwork(packet) => outs.push(Out::Net(packet.to_vec())),
+                    other => panic!("unexpected result while flushing queue: {other:?}"),
                 }
             }
         }

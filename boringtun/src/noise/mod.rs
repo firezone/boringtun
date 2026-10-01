@@ -54,6 +54,8 @@ pub enum TunnResult<'a> {
     Done,
     Err(WireGuardError),
     WriteToNetwork(&'a mut [u8]),
+    /// A keepalive is due: send an empty data message, e.g. with [`Tunn::encapsulate_data_at`].
+    KeepaliveDue,
     WriteToTunnelV4(&'a mut [u8], Ipv4Addr),
     WriteToTunnelV6(&'a mut [u8], Ipv6Addr),
 }
@@ -406,16 +408,10 @@ impl Tunn {
         dst: &mut [u8],
         now: Instant,
     ) -> Result<PendingSeal, WireGuardError> {
-        let is_responder = self.timers.is_responder();
-        let Some(session) = self.sessions[self.current]
-            .as_mut()
-            .filter(|s| s.should_use_at(now) || is_responder)
-        else {
-            return Err(WireGuardError::NoCurrentSession);
-        };
-
-        // Send the packet using an established session
-        let seal = session.prepare_packet_data(src, dst)?;
+        let seal = self
+            .sending_session(now)
+            .ok_or(WireGuardError::NoCurrentSession)?
+            .prepare_packet_data(src, dst)?;
 
         self.timer_tick(TimerName::TimeLastPacketSent, now);
         // Exclude Keepalive packets from timer update.
@@ -425,6 +421,15 @@ impl Tunn {
         self.tx_bytes += src.len();
 
         Ok(seal)
+    }
+
+    /// The session that data messages are sent on, if one is usable.
+    fn sending_session(&mut self, now: Instant) -> Option<&mut session::Session> {
+        let is_responder = self.timers.is_responder();
+
+        self.sessions[self.current]
+            .as_mut()
+            .filter(|s| s.should_use_at(now) || is_responder)
     }
 
     /// Prepares the decryption of a data message into `dst`, deferring it to the returned
@@ -499,9 +504,9 @@ impl Tunn {
     /// Receives a UDP datagram from the network and parses it.
     /// Returns TunnResult.
     ///
-    /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
-    /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
-    /// packet is processed.
+    /// If the result is of type TunnResult::WriteToNetwork or TunnResult::KeepaliveDue, should repeat
+    /// the call with empty datagram, until TunnResult::Done is returned. If batch processing packets,
+    /// it is OK to defer until last packet is processed.
     pub fn decapsulate_at<'a>(
         &mut self,
         src_addr: Option<IpAddr>,
@@ -541,7 +546,7 @@ impl Tunn {
     ) -> TunnResult<'a> {
         match packet {
             Packet::HandshakeInit(p) => self.handle_handshake_init(p, dst, now),
-            Packet::HandshakeResponse(p) => self.handle_handshake_response(p, dst, now),
+            Packet::HandshakeResponse(p) => self.handle_handshake_response(p, now),
             Packet::PacketCookieReply(p) => self.handle_cookie_reply(p, now),
             Packet::PacketData(p) => self.handle_data(p, dst, now),
         }
@@ -578,7 +583,6 @@ impl Tunn {
     fn handle_handshake_response<'a>(
         &mut self,
         p: HandshakeResponse,
-        dst: &'a mut [u8],
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
         tracing::debug!(
@@ -587,9 +591,8 @@ impl Tunn {
             "Received handshake_response"
         );
 
-        let mut session = self.handshake.receive_handshake_response(p, now)?;
+        let session = self.handshake.receive_handshake_response(p, now)?;
 
-        let keepalive_packet = session.format_packet_data(&[], dst)?;
         // Store new session in ring buffer
         let local_idx = session.local_index();
         self.sessions[local_idx] = Some(session);
@@ -598,9 +601,8 @@ impl Tunn {
         self.timer_tick_session_established(true, now); // New session established, we are the initiator
         self.set_current_session(local_idx);
 
-        tracing::debug!(%local_idx, "Sending keepalive");
-
-        Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
+        // The keepalive confirms the session to the responder.
+        Ok(TunnResult::KeepaliveDue)
     }
 
     fn handle_cookie_reply<'a>(

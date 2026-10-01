@@ -78,6 +78,9 @@ impl<'a> From<TunnResult<'a>> for wireguard_result {
                 op: result_type::WRITE_TO_NETWORK,
                 size: b.len(),
             },
+            TunnResult::KeepaliveDue => {
+                unreachable!("keepalives are encapsulated before reaching the C API")
+            }
             TunnResult::WriteToTunnelV4(b, _) => wireguard_result {
                 op: result_type::WRITE_TO_TUNNEL_IPV4,
                 size: b.len(),
@@ -349,7 +352,11 @@ pub unsafe extern "C" fn wireguard_read(
     // Slices are not owned, and therefore will not be freed by Rust
     let src = slice::from_raw_parts(src, src_size as usize);
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.decapsulate_at(None, src, dst, Instant::now()))
+    let now = Instant::now();
+    match tunnel.decapsulate_at(None, src, dst, now) {
+        TunnResult::KeepaliveDue => encapsulate_keepalive(&mut tunnel, dst, now),
+        result => wireguard_result::from(result),
+    }
 }
 
 /// This is a state keeping function, that need to be called periodically.
@@ -363,7 +370,21 @@ pub unsafe extern "C" fn wireguard_tick(
     let mut tunnel = tunnel.as_ref().unwrap().lock();
     // Slices are not owned, and therefore will not be freed by Rust
     let dst = slice::from_raw_parts_mut(dst, dst_size as usize);
-    wireguard_result::from(tunnel.update_timers_at(dst, Instant::now()))
+    let now = Instant::now();
+    match tunnel.update_timers_at(dst, now) {
+        TunnResult::KeepaliveDue => encapsulate_keepalive(&mut tunnel, dst, now),
+        result => wireguard_result::from(result),
+    }
+}
+
+fn encapsulate_keepalive(tunnel: &mut Tunn, dst: &mut [u8], now: Instant) -> wireguard_result {
+    match tunnel.encapsulate_data_at(&[], dst, now) {
+        Ok(len) => wireguard_result {
+            op: result_type::WRITE_TO_NETWORK,
+            size: len,
+        },
+        Err(e) => wireguard_result::from(TunnResult::Err(e)),
+    }
 }
 
 /// Force the tunnel to initiate a new handshake, dst buffer must be at least 148 byte long.
