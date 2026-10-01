@@ -10,7 +10,7 @@ mod session;
 mod timers;
 
 pub use index::Index;
-pub use session::PendingSeal;
+pub use session::{Opened, PendingOpen, PendingSeal};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
@@ -427,6 +427,59 @@ impl Tunn {
         Ok(seal)
     }
 
+    /// Prepares the decryption of a data message into `dst`, deferring it to the returned
+    /// [`PendingOpen`].
+    ///
+    /// Selects the session and checks the counter against the replay window without updating
+    /// any state. Hand the [`Opened`] message back to [`Tunn::finish_decapsulate_data_at`] to
+    /// complete the decapsulation; [`Tunn::decapsulate_at`] does all three steps at once.
+    pub fn decapsulate_data_deferred(
+        &self,
+        packet: PacketData,
+        dst: &mut [u8],
+    ) -> Result<PendingOpen, WireGuardError> {
+        let remote_idx = Index::from_peer(packet.receiver_idx);
+
+        let session = self.sessions[remote_idx].as_ref().ok_or_else(|| {
+            tracing::trace!(%remote_idx, "No current session available");
+            WireGuardError::NoCurrentSession
+        })?;
+        let open = session.prepare_receive_packet_data(packet, dst)?;
+
+        Ok(open)
+    }
+
+    /// Completes the decapsulation of a data message decrypted into `dst`.
+    ///
+    /// Marks its counter as received, which rejects a duplicate that passed
+    /// [`Tunn::decapsulate_data_deferred`] before the original got here.
+    pub fn finish_decapsulate_data_at<'a>(
+        &mut self,
+        opened: Opened,
+        dst: &'a mut [u8],
+        now: Instant,
+    ) -> TunnResult<'a> {
+        let remote_idx = opened.receiving_index;
+
+        let Some(session) = self.sessions[remote_idx]
+            .as_mut()
+            .filter(|s| s.receiving_index == remote_idx)
+        else {
+            tracing::trace!(%remote_idx, "Session expired during decryption");
+            return TunnResult::Err(WireGuardError::NoCurrentSession);
+        };
+        let len = match session.finish_receive_packet_data(opened) {
+            Ok(len) => len,
+            Err(e) => return TunnResult::Err(e),
+        };
+
+        self.set_current_session(remote_idx);
+
+        self.timer_tick(TimerName::TimeLastPacketReceived, now);
+
+        self.validate_decapsulated_packet(&mut dst[..len], now)
+    }
+
     /// Receives a UDP datagram from the network and parses it.
     /// Returns TunnResult.
     ///
@@ -598,23 +651,9 @@ impl Tunn {
         dst: &'a mut [u8],
         now: Instant,
     ) -> Result<TunnResult<'a>, WireGuardError> {
-        let remote_idx = Index::from_peer(packet.receiver_idx);
+        let opened = self.decapsulate_data_deferred(packet, dst)?.open(dst);
 
-        // Get the (probably) right session
-        let decapsulated_packet = {
-            let session = self.sessions[remote_idx].as_mut();
-            let session = session.ok_or_else(|| {
-                tracing::trace!(%remote_idx, "No current session available");
-                WireGuardError::NoCurrentSession
-            })?;
-            session.receive_packet_data(packet, dst)?
-        };
-
-        self.set_current_session(remote_idx);
-
-        self.timer_tick(TimerName::TimeLastPacketReceived, now);
-
-        Ok(self.validate_decapsulated_packet(decapsulated_packet, now))
+        Ok(self.finish_decapsulate_data_at(opened, dst, now))
     }
 
     /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send

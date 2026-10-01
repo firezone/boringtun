@@ -265,15 +265,12 @@ impl Session {
         })
     }
 
-    /// packet - a data packet we received from the network
-    /// dst - pre-allocated space to hold the encapsulated IP packet, to send to the interface
-    ///       dst will always take less space than src
-    /// return the size of the encapsulated packet on success
-    pub(super) fn receive_packet_data<'a>(
-        &mut self,
+    /// Copies the ciphertext of a data message to `dst`, deferring the decryption.
+    pub(super) fn prepare_receive_packet_data(
+        &self,
         packet: PacketData,
-        dst: &'a mut [u8],
-    ) -> Result<&'a mut [u8], WireGuardError> {
+        dst: &mut [u8],
+    ) -> Result<PendingOpen, WireGuardError> {
         let ct_len = packet.encrypted_encapsulated_packet.len();
         let buf_len = dst.len();
 
@@ -288,22 +285,29 @@ impl Session {
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(packet.counter)?;
 
-        let ret = {
-            let mut nonce = [0u8; 12];
-            nonce[4..12].copy_from_slice(&packet.counter.to_le_bytes());
-            dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
-            self.receiver
-                .open_in_place(
-                    Nonce::assume_unique_for_key(nonce),
-                    Aad::from(&[]),
-                    &mut dst[..ct_len],
-                )
-                .map_err(|_| WireGuardError::InvalidAeadTag)?
-        };
+        dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
+
+        Ok(PendingOpen {
+            key: self.receiver.clone(),
+            receiving_index: self.receiving_index,
+            counter: packet.counter,
+            ciphertext_len: ct_len,
+        })
+    }
+
+    /// Accepts the counter of a decrypted data message, returning the length of its plaintext.
+    pub(super) fn finish_receive_packet_data(
+        &mut self,
+        opened: Opened,
+    ) -> Result<usize, WireGuardError> {
+        debug_assert_eq!(opened.receiving_index, self.receiving_index);
+
+        let plaintext_len = opened.plaintext_len?;
 
         // After decryption is done, check counter again, and mark as received
-        self.receiving_counter_mark(packet.counter)?;
-        Ok(ret)
+        self.receiving_counter_mark(opened.counter)?;
+
+        Ok(plaintext_len)
     }
 
     /// Returns the estimated downstream packet loss for this session
@@ -358,4 +362,54 @@ impl PendingSeal {
 
         self.message_len()
     }
+}
+
+/// The decryption of a data message whose ciphertext has been copied into a buffer.
+///
+/// Its counter has passed the replay check but is not yet marked as received: that only happens
+/// once the decrypted message is handed back to the [`Tunn`](super::Tunn), so a message that fails
+/// to authenticate never advances the replay window.
+#[must_use = "the data message is not decrypted until it is opened"]
+pub struct PendingOpen {
+    key: LessSafeKey,
+    receiving_index: Index,
+    counter: u64,
+    ciphertext_len: usize,
+}
+
+impl PendingOpen {
+    /// Decrypts the data message in `buf` in place.
+    ///
+    /// `buf` must start with the ciphertext copied there by the [`PendingOpen`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buf` is shorter than the ciphertext.
+    pub fn open(self, buf: &mut [u8]) -> Opened {
+        let mut nonce = [0u8; 12];
+        nonce[4..12].copy_from_slice(&self.counter.to_le_bytes());
+        let plaintext_len = self
+            .key
+            .open_in_place(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&[]),
+                &mut buf[..self.ciphertext_len],
+            )
+            .map(|plaintext| plaintext.len())
+            .map_err(|_| WireGuardError::InvalidAeadTag);
+
+        Opened {
+            receiving_index: self.receiving_index,
+            counter: self.counter,
+            plaintext_len,
+        }
+    }
+}
+
+/// A data message decrypted by [`PendingOpen::open`], to be handed back to the [`Tunn`](super::Tunn).
+#[must_use = "the data message is not accepted until it is handed back to the `Tunn`"]
+pub struct Opened {
+    pub(super) receiving_index: Index,
+    counter: u64,
+    plaintext_len: Result<usize, WireGuardError>,
 }
